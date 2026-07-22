@@ -171,6 +171,19 @@ After any listing command such as `feed`, `popular`, `all`, `sub`, or `search`, 
 | `RDT_SOLVECAPTCHA_API_KEY` | — | Solvecaptcha API key — enables automatic reCAPTCHA solving when publishing posts |
 | `APIKEY_SOLVECAPTCHA` | — | Fallback for the above (solvecaptcha-python's own convention) |
 
+## Config File
+
+`~/.config/rdt-cli/config.json` (optional) — settings applied when no env var overrides them:
+
+```json
+{
+  "solvecaptcha_api_key": "your-solvecaptcha-key"
+}
+```
+
+Solvecaptcha key priority: `RDT_SOLVECAPTCHA_API_KEY` → `APIKEY_SOLVECAPTCHA` → config file.
+A missing or invalid file is ignored silently.
+
 ## Rate Limiting & Anti-Detection
 
 rdt-cli includes anti-detection measures designed to minimize risk:

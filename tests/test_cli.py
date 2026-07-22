@@ -1360,14 +1360,54 @@ class TestCaptchaSolver:
 
         from rdt_cli.captcha import get_solvecaptcha_api_key
 
-        with patch.dict(os.environ, {}, clear=True):
+        # load_user_config stubbed out: env-only resolution, hermetic against
+        # any real ~/.config/rdt-cli/config.json on the dev machine.
+        with patch("rdt_cli.captcha.load_user_config", return_value={}):
+            with patch.dict(os.environ, {}, clear=True):
+                assert get_solvecaptcha_api_key() is None
+            with patch.dict(os.environ, {"APIKEY_SOLVECAPTCHA": "pkg-key"}, clear=True):
+                assert get_solvecaptcha_api_key() == "pkg-key"
+            with patch.dict(
+                os.environ,
+                {"RDT_SOLVECAPTCHA_API_KEY": "rdt-key", "APIKEY_SOLVECAPTCHA": "pkg-key"},
+                clear=True,
+            ):
+                assert get_solvecaptcha_api_key() == "rdt-key"
+
+    def test_api_key_from_config_file(self, tmp_path):
+        import os
+
+        from rdt_cli.captcha import get_solvecaptcha_api_key
+
+        cfg = tmp_path / "config.json"
+        cfg.write_text(json.dumps({"solvecaptcha_api_key": "file-key"}))
+        with patch.dict(os.environ, {}, clear=True), \
+             patch("rdt_cli.config.USER_CONFIG_FILE", cfg):
+            assert get_solvecaptcha_api_key() == "file-key"
+
+    def test_api_key_env_beats_config_file(self, tmp_path):
+        import os
+
+        from rdt_cli.captcha import get_solvecaptcha_api_key
+
+        cfg = tmp_path / "config.json"
+        cfg.write_text(json.dumps({"solvecaptcha_api_key": "file-key"}))
+        with patch.dict(os.environ, {"APIKEY_SOLVECAPTCHA": "env-key"}, clear=True), \
+             patch("rdt_cli.config.USER_CONFIG_FILE", cfg):
+            assert get_solvecaptcha_api_key() == "env-key"
+
+    def test_api_key_missing_or_invalid_config_file(self, tmp_path):
+        import os
+
+        from rdt_cli.captcha import get_solvecaptcha_api_key
+
+        with patch.dict(os.environ, {}, clear=True), \
+             patch("rdt_cli.config.USER_CONFIG_FILE", tmp_path / "nope.json"):
             assert get_solvecaptcha_api_key() is None
-        with patch.dict(os.environ, {"APIKEY_SOLVECAPTCHA": "pkg-key"}, clear=True):
-            assert get_solvecaptcha_api_key() == "pkg-key"
-        with patch.dict(
-            os.environ,
-            {"RDT_SOLVECAPTCHA_API_KEY": "rdt-key", "APIKEY_SOLVECAPTCHA": "pkg-key"},
-            clear=True,
-        ):
-            assert get_solvecaptcha_api_key() == "rdt-key"
+
+        bad = tmp_path / "config.json"
+        bad.write_text("{not json")
+        with patch.dict(os.environ, {}, clear=True), \
+             patch("rdt_cli.config.USER_CONFIG_FILE", bad):
+            assert get_solvecaptcha_api_key() is None
 

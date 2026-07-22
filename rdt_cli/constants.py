@@ -5,6 +5,8 @@ from pathlib import Path
 # ── Config ──────────────────────────────────────────────────────────
 CONFIG_DIR = Path.home() / ".config" / "rdt-cli"
 CREDENTIAL_FILE = CONFIG_DIR / "credential.json"
+# Optional user settings (JSON). See rdt_cli.config.load_user_config.
+USER_CONFIG_FILE = CONFIG_DIR / "config.json"
 
 # ── Base URL ────────────────────────────────────────────────────────
 BASE_URL = "https://www.reddit.com"

@@ -10,6 +10,8 @@ protocol that the ``solvecaptcha-python`` package wraps (POST /in.php, poll
 API key resolution (first match wins, see SOLVECAPTCHA_KEY_ENV_VARS):
   1. ``RDT_SOLVECAPTCHA_API_KEY``
   2. ``APIKEY_SOLVECAPTCHA`` (solvecaptcha-python's own convention)
+  3. ``solvecaptcha_api_key`` in the user config file
+     (``~/.config/rdt-cli/config.json``)
 
 The returned token is single-use with a ~2 minute TTL — submit the post
 immediately after solving.
@@ -23,6 +25,7 @@ import time
 
 import httpx
 
+from .config import load_user_config
 from .constants import (
     BASE_URL,
     RECAPTCHA_ACTION,
@@ -49,12 +52,13 @@ class CaptchaSolveError(RedditApiError):
 
 
 def get_solvecaptcha_api_key() -> str | None:
-    """Return the Solvecaptcha API key from the environment, if configured."""
+    """Return the Solvecaptcha API key: env vars first, then the config file."""
     for var in SOLVECAPTCHA_KEY_ENV_VARS:
         key = os.environ.get(var, "").strip()
         if key:
             return key
-    return None
+    key = str(load_user_config().get("solvecaptcha_api_key", "")).strip()
+    return key or None
 
 
 def solve_recaptcha_token(

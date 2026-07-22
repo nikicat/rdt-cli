@@ -7,8 +7,9 @@ score-based, action ``post_submit``). A valid token can come from two sources:
 1. ``--recaptcha-token`` — captured from a real browser (DevTools, single-use,
    ~2 min TTL), or
 2. automatic solving — when a Solvecaptcha API key is configured (env
-   ``RDT_SOLVECAPTCHA_API_KEY`` or ``APIKEY_SOLVECAPTCHA``), a token is bought
-   from solvecaptcha.com just before publishing (see rdt_cli.captcha).
+   ``RDT_SOLVECAPTCHA_API_KEY`` / ``APIKEY_SOLVECAPTCHA``, or
+   ``solvecaptcha_api_key`` in ``~/.config/rdt-cli/config.json``), a token is
+   bought from solvecaptcha.com just before publishing (see rdt_cli.captcha).
 
 Without either, use ``--draft``.
 """
@@ -63,9 +64,10 @@ _RECAPTCHA_HELP = (
     "Publishing requires a reCAPTCHA Enterprise token — Reddit gates post "
     "submission with invisible, score-based reCAPTCHA (action 'post_submit'). "
     "Either pass a browser-captured token via --recaptcha-token (single-use, "
-    "~2 min), or set a Solvecaptcha API key (env RDT_SOLVECAPTCHA_API_KEY or "
-    "APIKEY_SOLVECAPTCHA) to buy a token automatically. Without either, use "
-    "--draft to save a draft headlessly."
+    "~2 min), or configure a Solvecaptcha API key to buy one automatically "
+    "(env RDT_SOLVECAPTCHA_API_KEY / APIKEY_SOLVECAPTCHA, or "
+    "'solvecaptcha_api_key' in ~/.config/rdt-cli/config.json). Without "
+    "either, use --draft to save a draft headlessly."
 )
 
 

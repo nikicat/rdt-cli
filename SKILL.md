@@ -130,7 +130,7 @@ Payloads live under `.data`.
 
 Exactly one of `--text` / `--url` / `--image`. Target a subreddit or a profile (`u_<name>`). Add `--json` for a structured result.
 
-**Drafts** save headlessly. **Publishing** is gated behind reCAPTCHA Enterprise (invisible, score-based). Token sources, checked in order: `--recaptcha-token` captured from a browser (single-use, ~2 min), else automatic solving via solvecaptcha.com when `RDT_SOLVECAPTCHA_API_KEY` (or `APIKEY_SOLVECAPTCHA`) is set — the key's presence opts in to a paid solve (~10-60s) right before publishing.
+**Drafts** save headlessly. **Publishing** is gated behind reCAPTCHA Enterprise (invisible, score-based). Token sources, checked in order: `--recaptcha-token` captured from a browser (single-use, ~2 min), else automatic solving via solvecaptcha.com when a Solvecaptcha API key is configured — env `RDT_SOLVECAPTCHA_API_KEY` / `APIKEY_SOLVECAPTCHA`, or `solvecaptcha_api_key` in `~/.config/rdt-cli/config.json`. The key's presence opts in to a paid solve (~10-60s) right before publishing.
 
 | Command | Description | Example |
 |---------|-------------|---------|
