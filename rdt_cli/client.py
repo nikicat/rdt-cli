@@ -457,23 +457,22 @@ class RedditClient:
             raise RedditApiError(f"Image upload failed (HTTP {resp.status_code})")
         return media_id
 
-    def upload_image_as_embed(self, path: str) -> str:
-        """Upload an image and return its CDN URL for inline embeds in self-posts.
+    def upload_image_as_embed(self, path: str) -> tuple[str, str]:
+        """Upload an image for embedding in a self-post body; return (media_id, cdn_url).
 
-        A self-post can't hold media directly, but its markdown can reference
-        Reddit-hosted images: ``https://i.redd.it/<mediaId>.<ext>`` serves
-        unsigned (unlike ``preview.redd.it`` URLs, whose ``s=`` param is a
-        signature). New Reddit is expected to render such links inline, as it
-        does for editor-uploaded embeds (live verification pending).
+        The media id goes into an RTJSON ``img`` node (renders as a real inline
+        image on New Reddit); the CDN URL is the markdown fallback link target:
+        ``https://i.redd.it/<mediaId>.<ext>`` serves unsigned (unlike
+        ``preview.redd.it`` URLs, whose ``s=`` param is a signature).
         """
         media_id = self.upload_image(path)
         content_type, _ = mimetypes.guess_type(Path(path).name)
         ext = IMAGE_MIME_TO_EXT.get(content_type or "", "jpg")
-        return f"{MEDIA_CDN_HOST}/{media_id}.{ext}"
+        return media_id, f"{MEDIA_CDN_HOST}/{media_id}.{ext}"
 
     def create_post(
         self,
-        subreddit_id: str,
+        subreddit_name: str,
         title: str,
         *,
         recaptcha_token: str,
@@ -481,6 +480,7 @@ class RedditClient:
         body: str | None = None,
         url: str | None = None,
         media_id: str | None = None,
+        rich_text: str | None = None,
         nsfw: bool = False,
         spoiler: bool = False,
         is_profile: bool = False,
@@ -491,32 +491,50 @@ class RedditClient:
         score-based, action ``post_submit``). ``recaptcha_token`` MUST be a fresh
         token obtained from a browser (single-use, ~2 min TTL) — it cannot be
         produced headlessly, so this call fails without one. Field shapes come
-        from captured live requests + ``ValidateCreatePostInput``:
-        self→``content.markdown``, link→``url``, image→``gallery.items[].mediaId``
-        (subreddit) or ``image.url`` (profile).
+        from captured live requests (deviating from them 500s):
+        the subreddit is addressed by **name** (``subredditName`` — not the
+        ``t5_`` id, which drafts use), there is **no** ``postType`` field, and
+        ``isCommercialCommunication``/``targetLanguage`` are always sent.
+        Kind-specific fields: self→``content.markdown``|``content.richText``,
+        link→``url``, image→``gallery.items[].mediaId`` (subreddit) or
+        ``image.url`` (profile). A self-post may also carry ``media_id``: the
+        image is attached via ``image.url`` (both targets — captured subreddit
+        traffic attaches this way too, not via gallery) and renders after the
+        body, uncaptioned.
+
+        For self-posts, ``rich_text`` (stringified RTJSON, see rdt_cli.richtext)
+        replaces the markdown: ``content`` carries exactly one representation,
+        and the fancy-pants editor always submits ``content.richText`` alone
+        (captured live requests never pair it with markdown). Reddit stores the
+        RTJSON canonically and derives the markdown export from it, so ``body``
+        is ignored when ``rich_text`` is given. RTJSON is the only way to get
+        true inline image blocks — a markdown body renders image links as links.
         """
+        if kind == "self":
+            content = {"richText": rich_text} if rich_text else self._markdown_content(body)
+        else:
+            content = {}
         inp: dict[str, Any] = {
             "title": title,
             "isNsfw": bool(nsfw),
             "isSpoiler": bool(spoiler),
-            "content": self._markdown_content(body) if kind == "self" else {},
+            "content": content,
+            "isCommercialCommunication": False,
+            "targetLanguage": "",
             "recaptchaToken": recaptcha_token,
             "correlationId": str(uuid.uuid4()),
         }
+        if kind == "self" and media_id:
+            inp["image"] = {"url": f"{MEDIA_S3_HOST}/{media_id}"}
+        elif kind == "link":
+            inp["url"] = url
         if is_profile:
-            inp["isCommercialCommunication"] = False
-            inp["targetLanguage"] = ""
-            if kind == "link":
-                inp["url"] = url
-            elif kind == "image":
+            if kind == "image":
                 inp["image"] = {"url": f"{MEDIA_S3_HOST}/{media_id}"}
             return self._graphql(OP_CREATE_PROFILE_POST, {"input": inp})
 
-        inp["subredditId"] = subreddit_id
-        inp["postType"] = {"self": "TEXT", "link": "LINK", "image": "IMAGE"}[kind]
-        if kind == "link":
-            inp["url"] = url
-        elif kind == "image":
+        inp["subredditName"] = subreddit_name.removeprefix("r/")
+        if kind == "image":
             inp["gallery"] = {"items": [{"mediaId": media_id}]}
         return self._graphql(OP_CREATE_POST, {"input": inp})
 

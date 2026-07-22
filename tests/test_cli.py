@@ -1159,7 +1159,7 @@ class TestPostCommand:
              patch("rdt_cli.client.RedditClient.resolve_subreddit_id", return_value="t5_abc"), \
              patch(
                  "rdt_cli.client.RedditClient.upload_image_as_embed",
-                 return_value="https://i.redd.it/mid1.jpg",
+                 return_value=("mid1", "https://i.redd.it/mid1.jpg"),
              ) as mock_up, \
              patch("rdt_cli.client.RedditClient.create_post", return_value={}) as mock_post:
             result = runner.invoke(
@@ -1171,8 +1171,19 @@ class TestPostCommand:
             mock_up.assert_called_once_with(str(img))
             _, kwargs = mock_post.call_args
             assert kwargs["kind"] == "self"
+            # marker-substituted markdown still computed (drafts use it; on
+            # publish create_post ignores body once rich_text is given)
             assert kwargs["body"] == "before [cat pic](https://i.redd.it/mid1.jpg) after"
             assert "![img]" not in kwargs["body"]
+            # rich_text: markers become RTJSON img blocks (true inline images)
+            rtjson = json.loads(kwargs["rich_text"])
+            assert rtjson == {
+                "document": [
+                    {"e": "par", "c": [{"e": "text", "t": "before "}]},
+                    {"e": "img", "id": "mid1", "c": "cat pic"},
+                    {"e": "par", "c": [{"e": "text", "t": " after"}]},
+                ]
+            }
 
     def test_embed_draft_substitutes_markers(self, tmp_path):
         cred = self._cred()
@@ -1184,7 +1195,7 @@ class TestPostCommand:
              patch("rdt_cli.client.RedditClient.resolve_subreddit_id", return_value="t5_abc"), \
              patch(
                  "rdt_cli.client.RedditClient.upload_image_as_embed",
-                 return_value="https://i.redd.it/mid2.png",
+                 return_value=("mid2", "https://i.redd.it/mid2.png"),
              ), \
              patch("rdt_cli.client.RedditClient.create_draft", return_value={}) as mock_draft:
             result = runner.invoke(
@@ -1192,6 +1203,7 @@ class TestPostCommand:
             )
             assert result.exit_code == 0, result.output
             _, kwargs = mock_draft.call_args
+            # drafts are markdown-only (no RTJSON media blocks) — links fallback
             assert kwargs["body"] == "see [pic](https://i.redd.it/mid2.png)"
 
     def test_profile_publish_uses_profile_flag(self):
@@ -1213,7 +1225,7 @@ class TestPostCommand:
         with patch("rdt_cli.commands._common.get_credential", return_value=cred):
             result = runner.invoke(cli, ["post", "test", "No body", "--draft"])
             assert result.exit_code == 2
-            assert "exactly one" in result.output
+            assert "Provide --text, --url, or --image" in result.output
 
     def test_rejects_two_kinds(self):
         cred = self._cred()
@@ -1222,7 +1234,67 @@ class TestPostCommand:
                 cli, ["post", "test", "Two", "--text", "a", "--url", "https://e.com", "--draft"]
             )
             assert result.exit_code == 2
-            assert "exactly one" in result.output
+            assert "Provide --text, --url, or --image" in result.output
+
+    def test_text_with_attached_image_publishes_self_with_media(self, tmp_path):
+        cred = self._cred()
+        img = tmp_path / "chart.png"
+        img.write_bytes(b"\x89PNG\r\n\x1a\n")
+        with patch("rdt_cli.commands._common.get_credential", return_value=cred), \
+             patch("rdt_cli.commands.submit.write_delay"), \
+             patch("rdt_cli.client.RedditClient.validate_session", return_value={}), \
+             patch("rdt_cli.client.RedditClient.resolve_subreddit_id", return_value="t5_abc"), \
+             patch("rdt_cli.client.RedditClient.upload_image", return_value="mid9") as mock_up, \
+             patch("rdt_cli.client.RedditClient.create_post", return_value={}) as mock_post:
+            result = runner.invoke(
+                cli, ["post", "test", "T", "--text", "body", "--image", str(img),
+                      "--recaptcha-token", "TOK", "--json"],
+            )
+            assert result.exit_code == 0, result.output
+            mock_up.assert_called_once_with(str(img))
+            _, kwargs = mock_post.call_args
+            # --text + --image → still a text post, image attached via media_id
+            assert kwargs["kind"] == "self"
+            assert kwargs["body"] == "body"
+            assert kwargs["media_id"] == "mid9"
+
+    def test_embed_combines_with_attached_image(self, tmp_path):
+        cred = self._cred()
+        inline = tmp_path / "inline.png"
+        inline.write_bytes(b"\x89PNG\r\n\x1a\n")
+        attach = tmp_path / "attach.png"
+        attach.write_bytes(b"\x89PNG\r\n\x1a\n")
+        with patch("rdt_cli.commands._common.get_credential", return_value=cred), \
+             patch("rdt_cli.commands.submit.write_delay"), \
+             patch("rdt_cli.client.RedditClient.validate_session", return_value={}), \
+             patch(
+                 "rdt_cli.client.RedditClient.upload_image_as_embed",
+                 return_value=("mid1", "https://i.redd.it/mid1.png"),
+             ), \
+             patch("rdt_cli.client.RedditClient.upload_image", return_value="mid2") as mock_up, \
+             patch("rdt_cli.client.RedditClient.create_post", return_value={}) as mock_post:
+            result = runner.invoke(
+                cli, ["post", "test", "T", "--text", "a ![img] b", "--embed", str(inline),
+                      "--image", str(attach), "--recaptcha-token", "TOK", "--json"],
+            )
+            assert result.exit_code == 0, result.output
+            # hybrid: inline RTJSON embed + attached image (feed preview) together
+            mock_up.assert_called_once_with(str(attach))
+            _, kwargs = mock_post.call_args
+            assert kwargs["kind"] == "self"
+            assert kwargs["media_id"] == "mid2"
+            assert json.loads(kwargs["rich_text"])["document"][1]["id"] == "mid1"
+
+    def test_rejects_text_with_image_draft(self, tmp_path):
+        cred = self._cred()
+        img = tmp_path / "pic.png"
+        img.write_bytes(b"\x89PNG\r\n\x1a\n")
+        with patch("rdt_cli.commands._common.get_credential", return_value=cred):
+            result = runner.invoke(
+                cli, ["post", "test", "T", "--text", "body", "--image", str(img), "--draft"]
+            )
+            assert result.exit_code == 2
+            assert "draft" in result.output.lower()
 
     def test_rejects_image_draft(self, tmp_path):
         cred = self._cred()
@@ -1297,14 +1369,140 @@ class TestClientPostMethods:
                 assert inp["kind"] == "MARKDOWN"
                 assert inp["content"] == {"markdown": "hello"}
 
-    def test_create_post_link_payload(self):
+    def test_create_post_self_with_rich_text(self):
         with self._client() as client:
             with patch.object(client, "_graphql", return_value={}) as g:
-                client.create_post("t5_x", "T", recaptcha_token="TOK", kind="link", url="https://e.com")
+                client.create_post(
+                    "test", "T", recaptcha_token="TOK", kind="self",
+                    body="before [s](https://i.redd.it/m1.jpg) after",
+                    rich_text='{"document":[{"e":"par","c":[{"e":"text","t":"before "}]},'
+                              '{"e":"img","id":"m1","c":"s"},'
+                              '{"e":"par","c":[{"e":"text","t":" after"}]}]}',
+                )
                 op, variables = g.call_args.args
                 assert op == "CreatePost"
                 inp = variables["input"]
-                assert inp["postType"] == "LINK"
+                # captured community requests address by name, without postType
+                assert inp["subredditName"] == "test"
+                assert "postType" not in inp
+                assert "subredditId" not in inp
+                content = inp["content"]
+                # editor-style: content carries the RTJSON alone, never a
+                # markdown+richText pair (body is ignored when rich_text given)
+                assert "markdown" not in content
+                rtjson = json.loads(content["richText"])
+                assert rtjson["document"][1] == {"e": "img", "id": "m1", "c": "s"}
+
+    def test_5xx_surfaces_response_body_in_error(self):
+        import httpx
+
+        from rdt_cli.exceptions import RedditApiError
+
+        with self._client() as client:
+            transport = client._write_transport
+            resp = httpx.Response(
+                500,
+                text='{"errors":[{"message":"SUBREDDIT_NOT_ALLOWED"}]}',
+                request=httpx.Request("POST", "https://www.reddit.com/svc/shreddit/graphql"),
+            )
+            with patch.object(transport.client, "request", return_value=resp) as mock_req, \
+                 patch("rdt_cli.transports.time.sleep"):
+                with pytest.raises(RedditApiError) as exc_info:
+                    transport.request("POST", "/svc/shreddit/graphql")
+            # the server's error body must reach the user, not a bare retry count
+            assert "HTTP 500" in str(exc_info.value)
+            assert "SUBREDDIT_NOT_ALLOWED" in str(exc_info.value)
+            # writes fail fast: no 5xx retries (mutations aren't idempotent and
+            # recaptcha tokens are single-use)
+            assert mock_req.call_count == 1
+
+    def test_read_transport_retries_5xx(self):
+        import httpx
+
+        from rdt_cli.exceptions import RedditApiError
+
+        with self._client() as client:
+            transport = client._read_transport
+            resp = httpx.Response(
+                503,
+                text="upstream connect error",
+                request=httpx.Request("GET", "https://www.reddit.com/r/test.json"),
+            )
+            with patch.object(transport.client, "request", return_value=resp) as mock_req, \
+                 patch("rdt_cli.transports.time.sleep"):
+                with pytest.raises(RedditApiError) as exc_info:
+                    transport.request("GET", "/r/test.json")
+            assert "HTTP 503" in str(exc_info.value)
+            assert "upstream connect error" in str(exc_info.value)
+            # reads keep the backoff-and-retry behavior, exhausting max_retries
+            assert mock_req.call_count == client._max_retries
+
+    def test_create_post_self_with_attached_image(self):
+        with self._client() as client:
+            with patch.object(client, "_graphql", return_value={}) as g:
+                client.create_post(
+                    "test", "T", recaptcha_token="TOK", kind="self",
+                    body="text", media_id="mid7",
+                )
+                op, variables = g.call_args.args
+                assert op == "CreatePost"
+                inp = variables["input"]
+                # captured traffic: text posts attach via image.url even on
+                # subreddits (gallery.items is for pure image posts only)
+                assert inp["subredditName"] == "test"
+                assert inp["isCommercialCommunication"] is False
+                assert inp["targetLanguage"] == ""
+                assert inp["content"] == {"markdown": "text"}
+                assert inp["image"] == {
+                    "url": "https://reddit-uploaded-media.s3-accelerate.amazonaws.com/mid7"
+                }
+                assert "gallery" not in inp
+
+    def test_create_post_self_rich_text_with_attached_image(self):
+        with self._client() as client:
+            with patch.object(client, "_graphql", return_value={}) as g:
+                client.create_post(
+                    "test", "T", recaptcha_token="TOK", kind="self",
+                    rich_text='{"document":[{"e":"img","id":"m1"}]}', media_id="mid9",
+                )
+                _, variables = g.call_args.args
+                inp = variables["input"]
+                assert inp["content"] == {"richText": '{"document":[{"e":"img","id":"m1"}]}'}
+                assert inp["image"]["url"].endswith("/mid9")
+
+    def test_create_profile_post_self_with_attached_image(self):
+        with self._client() as client:
+            with patch.object(client, "_graphql", return_value={}) as g:
+                client.create_post(
+                    "t5_x", "T", recaptcha_token="TOK", kind="self",
+                    body="text", media_id="mid8", is_profile=True,
+                )
+                op, variables = g.call_args.args
+                assert op == "CreateProfilePost"
+                inp = variables["input"]
+                assert inp["content"] == {"markdown": "text"}
+                assert inp["image"] == {
+                    "url": "https://reddit-uploaded-media.s3-accelerate.amazonaws.com/mid8"
+                }
+
+    def test_create_post_self_without_rich_text_omits_field(self):
+        with self._client() as client:
+            with patch.object(client, "_graphql", return_value={}) as g:
+                client.create_post("t5_x", "T", recaptcha_token="TOK", kind="self", body="hi")
+                _, variables = g.call_args.args
+                content = variables["input"]["content"]
+                assert content == {"markdown": "hi"}
+                assert "richText" not in content
+
+    def test_create_post_link_payload(self):
+        with self._client() as client:
+            with patch.object(client, "_graphql", return_value={}) as g:
+                client.create_post("test", "T", recaptcha_token="TOK", kind="link", url="https://e.com")
+                op, variables = g.call_args.args
+                assert op == "CreatePost"
+                inp = variables["input"]
+                assert inp["subredditName"] == "test"
+                assert "postType" not in inp
                 assert inp["url"] == "https://e.com"
                 assert inp["recaptchaToken"] == "TOK"
                 assert "correlationId" in inp
@@ -1321,7 +1519,7 @@ class TestClientPostMethods:
                 inp = variables["input"]
                 assert inp["image"]["url"].endswith("/mid42")
                 assert inp["recaptchaToken"] == "TOK"
-                assert "subredditId" not in inp  # profile posts omit subredditId
+                assert "subredditName" not in inp  # profile posts have no target
 
     def test_upload_image(self, tmp_path):
         img = tmp_path / "pic.png"
@@ -1351,9 +1549,68 @@ class TestClientPostMethods:
             img.write_bytes(b"\x00")
             with self._client() as client:
                 with patch.object(client, "upload_image", return_value="mid42") as mock_up:
-                    url = client.upload_image_as_embed(str(img))
+                    media_id, url = client.upload_image_as_embed(str(img))
+            assert media_id == "mid42"
             assert url == f"https://i.redd.it/mid42.{ext}"
             mock_up.assert_called_once_with(str(img))
+
+
+# ── RTJSON building for inline embeds ───────────────────────────────
+
+
+class TestRichtext:
+    def test_interleaves_paragraphs_and_images(self):
+        from rdt_cli.richtext import build_rtjson
+
+        doc = json.loads(build_rtjson("before ![img] after", [("mid1", "cat pic")]))
+        assert doc == {
+            "document": [
+                {"e": "par", "c": [{"e": "text", "t": "before "}]},
+                {"e": "img", "id": "mid1", "c": "cat pic"},
+                {"e": "par", "c": [{"e": "text", "t": " after"}]},
+            ]
+        }
+
+    def test_multiple_images_in_order(self):
+        from rdt_cli.richtext import build_rtjson
+
+        doc = json.loads(build_rtjson("a ![img] b ![img] c", [("m1", "one"), ("m2", "two")]))
+        assert doc["document"] == [
+            {"e": "par", "c": [{"e": "text", "t": "a "}]},
+            {"e": "img", "id": "m1", "c": "one"},
+            {"e": "par", "c": [{"e": "text", "t": " b "}]},
+            {"e": "img", "id": "m2", "c": "two"},
+            {"e": "par", "c": [{"e": "text", "t": " c"}]},
+        ]
+
+    def test_marker_at_edges_adds_no_empty_paragraphs(self):
+        from rdt_cli.richtext import build_rtjson
+
+        doc = json.loads(build_rtjson("![img]", [("m1", "")]))
+        assert doc["document"] == [{"e": "img", "id": "m1"}]  # empty caption omitted
+
+    def test_newlines_become_paragraphs(self):
+        from rdt_cli.richtext import build_rtjson
+
+        doc = json.loads(build_rtjson("line1\n\nline2 ![img]", [("m1", "cap")]))
+        # blank lines are dropped — editor documents never hold empty par nodes
+        assert doc["document"] == [
+            {"e": "par", "c": [{"e": "text", "t": "line1"}]},
+            {"e": "par", "c": [{"e": "text", "t": "line2 "}]},
+            {"e": "img", "id": "m1", "c": "cap"},
+        ]
+
+    def test_empty_body_yields_single_empty_paragraph(self):
+        from rdt_cli.richtext import build_rtjson
+
+        doc = json.loads(build_rtjson("", []))
+        assert doc["document"] == [{"e": "par", "c": [{"e": "text", "t": ""}]}]
+
+    def test_marker_media_count_mismatch_raises(self):
+        from rdt_cli.richtext import build_rtjson
+
+        with pytest.raises(ValueError):
+            build_rtjson("![img] ![img]", [("m1", "one")])
 
 
 # ── Captcha solving via Solvecaptcha (mocked HTTP) ──────────────────

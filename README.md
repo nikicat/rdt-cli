@@ -133,12 +133,34 @@ rdt post python "Title" --text "body" --recaptcha-token <tok>  # Publish text po
 rdt post pics "My cat" --image cat.jpg                         # Publish image (captcha auto-solved)
 rdt post u_yourname "On my profile" --text "hi"                # Publish to profile
 rdt post python "Guide" --text "step 1 ![img] done" --embed step1.jpg  # Inline image in a text post
+rdt post python "Report" --text "summary **md**" --image chart.png     # Text post + attached image
 ```
+
+> **Attached image in a text post:** `--text` + `--image` publishes a markdown
+> text post with the image attached (`image.url` in the mutation input): it
+> renders after the body, uncaptioned. The body stays markdown, so formatting
+> works — markdown just can't *inline* images; for that use `--embed`.
+>
+> **Feed visibility trade-off (live-verified):** an attached image is the
+> post's preview media, so it shows on feed/list cards too. Inline (`--embed`)
+> images are body content only — feed cards show just the text preview, and
+> the images appear only once the post is opened. Pick `--image` for feed
+> visibility, `--embed` for placement and captions. Combining `--embed` with
+> `--image` gives both (live-verified): the feed card shows the attached image
+> (inline embeds stay feed-hidden), and the opened post shows the inline
+> embeds in place *plus* the attachment after the body — so attach a distinct
+> image unless you want it appearing twice in the post.
 
 > **Inline images in text posts:** each `--embed FILE` uploads an image and
 > replaces one `![img]` marker in `--text` (markers are substituted in order).
-> The body then links the Reddit-hosted image (`https://i.redd.it/<id>.<ext>`,
-> which serves unsigned — `preview.redd.it` URLs don't).
+> On publish, the body is sent editor-style as RTJSON (`content.richText`,
+> *instead of* markdown — Reddit stores the RTJSON canonically and derives the
+> markdown export from it): New Reddit renders each marker as a real inline
+> image block (caption = file name). The RTJSON body is plain text, so keep
+> `--text` unformatted when embedding — markdown syntax would show literally.
+> Drafts are markdown-only, so embeds there stay links to the Reddit-hosted
+> image (`https://i.redd.it/<id>.<ext>`, which serves unsigned —
+> `preview.redd.it` URLs don't).
 
 > **Note:** Reddit drafts store text/link only — not images (image drafts aren't
 > supported by Reddit). Publishing any post requires a reCAPTCHA Enterprise
@@ -254,6 +276,7 @@ rdt_cli/
 ├── constants.py          # URLs, headers, sort options
 ├── exceptions.py         # Error hierarchy (6 exception types)
 ├── index_cache.py        # Short-index cache for show/open commands
+├── richtext.py           # RTJSON document building (inline images in self-posts)
 └── commands/
     ├── _common.py        # Shared helpers (envelope, output routing, formatters)
     ├── auth.py           # login, logout, status, whoami

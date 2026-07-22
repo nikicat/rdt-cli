@@ -46,6 +46,11 @@ SSL_CONTEXT = build_ssl_context()
 class BaseTransport:
     """Shared retry, throttling, and cookie management."""
 
+    # WriteTransport opts out: mutations aren't idempotent (a 500 may follow a
+    # partial success) and recaptcha tokens are single-use, so a retry can at
+    # best fail again and at worst double-post.
+    retry_server_errors = True
+
     def __init__(
         self,
         session: SessionState,
@@ -102,61 +107,90 @@ class BaseTransport:
             self.session.cookies[name] = value
         self.session.refresh_capabilities()
 
+    def _send(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
+        """One attempt: send, absorb Set-Cookie into the session, count, log."""
+        t0 = time.time()
+        resp = self.client.request(method, url, **kwargs)
+        self._merge_response_cookies(resp)
+        self._request_count += 1
+        self._last_request_time = time.time()
+        logger.info(
+            "[#%d] %s %s -> %d (%.2fs)",
+            self._request_count,
+            method,
+            url[:80],
+            resp.status_code,
+            time.time() - t0,
+        )
+        return resp
+
+    @staticmethod
+    def _backoff(attempt: int, reason: str) -> None:
+        wait = (2**attempt) + random.uniform(0, 1)
+        logger.warning("%s, retrying in %.1fs", reason, wait)
+        time.sleep(wait)
+
+    @staticmethod
+    def _terminal(resp: httpx.Response) -> Any:
+        """Turn a non-retryable response into parsed JSON or a typed error."""
+        if resp.status_code == 401:
+            raise SessionExpiredError()
+        if resp.status_code == 403:
+            raise ForbiddenError()
+        if resp.status_code == 404:
+            raise NotFoundError()
+        resp.raise_for_status()
+
+        text = resp.text
+        if text.strip().startswith("<"):
+            raise RedditApiError("Received HTML instead of JSON (possible auth redirect)")
+        if not text.strip():
+            return {}
+        return resp.json()
+
     def request(self, method: str, url: str, **kwargs: Any) -> Any:
+        """Send with retry policy: 429 honors Retry-After; 5xx backs off
+        exponentially (skipped when ``retry_server_errors`` is off) and the
+        final error body is surfaced; network errors back off; other statuses
+        resolve immediately via :meth:`_terminal`.
+        """
         self._rate_limit_delay()
         last_exc: Exception | None = None
+        last_error_resp: httpx.Response | None = None
 
         for attempt in range(self._max_retries):
-            t0 = time.time()
+            final = attempt + 1 >= self._max_retries
             try:
-                resp = self.client.request(method, url, **kwargs)
-                elapsed = time.time() - t0
-                self._merge_response_cookies(resp)
-                self._request_count += 1
-                self._last_request_time = time.time()
-                logger.info(
-                    "[#%d] %s %s -> %d (%.2fs)",
-                    self._request_count,
-                    method,
-                    url[:80],
-                    resp.status_code,
-                    elapsed,
-                )
-
-                if resp.status_code == 429:
-                    retry_after = float(resp.headers.get("Retry-After", 5))
-                    if attempt + 1 >= self._max_retries:
-                        raise RateLimitError(retry_after=retry_after)
-                    time.sleep(retry_after)
-                    continue
-
-                if resp.status_code in (500, 502, 503, 504):
-                    wait = (2**attempt) + random.uniform(0, 1)
-                    logger.warning("HTTP %d, retrying in %.1fs", resp.status_code, wait)
-                    time.sleep(wait)
-                    continue
-
-                if resp.status_code == 401:
-                    raise SessionExpiredError()
-                if resp.status_code == 403:
-                    raise ForbiddenError()
-                if resp.status_code == 404:
-                    raise NotFoundError()
-
-                resp.raise_for_status()
-
-                text = resp.text
-                if text.strip().startswith("<"):
-                    raise RedditApiError("Received HTML instead of JSON (possible auth redirect)")
-                if not text.strip():
-                    return {}
-                return resp.json()
+                resp = self._send(method, url, **kwargs)
             except (httpx.TimeoutException, httpx.NetworkError) as exc:
                 last_exc = exc
-                wait = (2**attempt) + random.uniform(0, 1)
-                logger.warning("Network error: %s, retrying in %.1fs", exc, wait)
-                time.sleep(wait)
+                if not final:
+                    self._backoff(attempt, f"Network error: {exc}")
+                continue
 
+            if resp.status_code == 429:
+                retry_after = float(resp.headers.get("Retry-After", 5))
+                if final:
+                    raise RateLimitError(retry_after=retry_after)
+                time.sleep(retry_after)
+                continue
+
+            if resp.status_code in (500, 502, 503, 504):
+                last_error_resp = resp
+                if not self.retry_server_errors or final:
+                    break  # raise below with the body, no further attempts
+                self._backoff(attempt, f"HTTP {resp.status_code}")
+                continue
+
+            return self._terminal(resp)
+
+        if last_error_resp is not None:
+            # Surface the server's error body — it may carry the actual
+            # failure reason as JSON.
+            detail = " ".join(last_error_resp.text.split())[:500]
+            raise RedditApiError(
+                f"HTTP {last_error_resp.status_code}" + (f": {detail}" if detail else "")
+            )
         if last_exc:
             raise RedditApiError(f"Request failed after {self._max_retries} retries: {last_exc}") from last_exc
         raise RedditApiError(f"Request failed after {self._max_retries} retries")
@@ -171,6 +205,8 @@ class ReadTransport(BaseTransport):
 
 class WriteTransport(BaseTransport):
     """Transport for state-changing authenticated requests."""
+
+    retry_server_errors = False
 
     def default_headers(self) -> dict[str, str]:
         return self.fingerprint.write_headers(modhash=self.session.modhash)

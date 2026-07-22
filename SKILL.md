@@ -139,8 +139,9 @@ Exactly one of `--text` / `--url` / `--image`. Target a subreddit or a profile (
 | `rdt post <sub> <title> --text <body> --recaptcha-token <tok>` | Publish text post (browser token) | `rdt post python "Hi" --text "..." --recaptcha-token <tok>` |
 | `rdt post <sub> <title> --image <file>` | Publish image post (captcha auto-solved if key set) | `rdt post pics "Cat" --image cat.jpg` |
 | `rdt post <sub> <title> --text <body> --embed <file>` | Text post with inline image(s) | `rdt post python "Guide" --text "step 1 ![img]" --embed s1.jpg` |
+| `rdt post <sub> <title> --text <body> --image <file>` | Text post + attached image (after body, no caption) | `rdt post python "Report" --text "summary" --image chart.png` |
 
-Optional flags: `--nsfw`, `--spoiler`. Notes: Reddit drafts can't store images (text/link only); `--image` requires publishing with a token (flag or solver). `--embed` needs one `![img]` marker per file in `--text` (substituted in order); the uploaded image is linked as `https://i.redd.it/<id>.<ext>`.
+Optional flags: `--nsfw`, `--spoiler`. Notes: Reddit drafts can't store images (text/link only); `--image` requires publishing with a token (flag or solver); `--embed` may combine with `--image`: the attachment becomes the feed-card image and also renders after the body in the opened post (inline embeds render in place there) — attach a distinct image to avoid an in-post duplicate. `--embed` needs one `![img]` marker per file in `--text` (substituted in order). On publish with embeds the body goes out as RTJSON (`content.richText`, replacing markdown; without embeds it stays `content.markdown`): New Reddit renders true inline image blocks with captions. Keep `--text` plain when embedding (markdown formatting isn't translated to RTJSON and shows literally). Drafts are markdown-only — embeds stay `https://i.redd.it/<id>.<ext>` links there. Feed visibility: `--embed` images show only inside the opened post (feed cards show text only); an attached `--image` also shows on feed/list cards — choose by whether feed visibility or inline placement/captions matters more.
 
 ### Account
 

@@ -25,6 +25,7 @@ from ..captcha import get_solvecaptcha_api_key, solve_recaptcha_token
 from ..client import RedditClient
 from ..constants import BASE_URL
 from ..exceptions import RedditApiError
+from ..richtext import build_rtjson
 from ._common import (
     console,
     exit_for_error,
@@ -95,7 +96,8 @@ _RECAPTCHA_HELP = (
     "--image", "image",
     type=click.Path(exists=True, dir_okay=False),
     default=None,
-    help="Image file to post (publish only; drafts can't store images)",
+    help="Image file to post — alone: an image post; with --text: attached "
+         "after the body (publish only; drafts can't store images)",
 )
 @click.option("--draft", is_flag=True, help="Save as a draft instead of publishing (text/link only)")
 @click.option(
@@ -128,9 +130,13 @@ def post(
 ) -> None:
     """Create a post in a subreddit or profile (u_<name>): text, link, or image.
 
-    Provide exactly one of --text, --url, or --image. With --text, --embed
-    uploads an image and substitutes it for an ![img] marker in the body
-    (one marker per --embed, in order), giving inline images in a text post.
+    Provide --text, --url, or --image; --text plus --image is also allowed
+    (the image is attached to the text post, shown after the body, no
+    caption). With --text, --embed uploads an image and substitutes it for an
+    ![img] marker in the body (one marker per --embed, in order), giving true
+    inline images in a text post. --embed may be combined with --image: the
+    attachment then also provides the feed-card preview (inline embeds alone
+    never show in feeds; the attachment additionally renders after the body).
 
     Drafts (--draft) are created headlessly. Publishing is gated behind reCAPTCHA
     Enterprise: pass a browser-captured --recaptcha-token, or set a Solvecaptcha
@@ -149,9 +155,12 @@ def post(
         (("--text", text is not None), ("--url", link_url is not None), ("--image", image is not None))
         if given
     ]
-    if len(provided) != 1:
-        raise click.UsageError("Provide exactly one of --text, --url, or --image.")
-    kind = {"--text": "self", "--url": "link", "--image": "image"}[provided[0]]
+    if not provided or (len(provided) > 1 and provided != ["--text", "--image"]):
+        raise click.UsageError(
+            "Provide --text, --url, or --image. Only --text --image may be "
+            "combined: a text post with the image attached after the body."
+        )
+    kind = "self" if text is not None else {"--url": "link", "--image": "image"}[provided[0]]
 
     if embeds and kind != "self":
         raise click.UsageError(
@@ -170,7 +179,7 @@ def post(
             "given. Pass one --embed <file> per marker, or remove the markers."
         )
 
-    if draft and kind == "image":
+    if draft and image is not None:
         raise click.UsageError(
             "--image cannot be combined with --draft: Reddit drafts cannot store "
             "images (the image only attaches at publish time). Publish it with "
@@ -192,12 +201,22 @@ def post(
     try:
         with RedditClient(cred) as client:
             client.validate_session()
-            subreddit_id = client.resolve_subreddit_id(subreddit)
+            rich_text: str | None = None
             if embeds:
                 console.print(f"[dim]⏳ Uploading {len(embeds)} embedded image(s)…[/dim]")
-                urls = [client.upload_image_as_embed(embed) for embed in embeds]
-                text = _embed_images(text or "", embeds, urls)
+                uploaded = [client.upload_image_as_embed(embed) for embed in embeds]
+                # Two body representations: publishing sends the RTJSON (true
+                # inline image blocks); drafts are markdown-only, so they get
+                # the marker-substituted CDN-link body instead.
+                rich_text = build_rtjson(
+                    text or "",
+                    [(media_id, Path(embed).stem) for (media_id, _), embed in zip(uploaded, embeds, strict=True)],
+                )
+                text = _embed_images(text or "", embeds, [url for _, url in uploaded])
             if draft:
+                # Drafts address the subreddit by t5_ id (confirmed live);
+                # publishing addresses it by name, as the editor does.
+                subreddit_id = client.resolve_subreddit_id(subreddit)
                 data = client.create_draft(
                     subreddit_id, title, body=text, url=link_url, nsfw=nsfw, spoiler=spoiler,
                 )
@@ -212,9 +231,9 @@ def post(
                     )
                     recaptcha_token = solve_recaptcha_token(solver_api_key or "")
                 data = client.create_post(
-                    subreddit_id, title, recaptcha_token=recaptcha_token, kind=kind,
-                    body=text, url=link_url, media_id=media_id, nsfw=nsfw, spoiler=spoiler,
-                    is_profile=is_profile,
+                    subreddit, title, recaptcha_token=recaptcha_token, kind=kind,
+                    body=text, url=link_url, media_id=media_id, rich_text=rich_text,
+                    nsfw=nsfw, spoiler=spoiler, is_profile=is_profile,
                 )
                 action = "Posted"
         write_delay()
