@@ -130,16 +130,16 @@ Payloads live under `.data`.
 
 Exactly one of `--text` / `--url` / `--image`. Target a subreddit or a profile (`u_<name>`). Add `--json` for a structured result.
 
-**Drafts** save headlessly. **Publishing** is gated behind reCAPTCHA Enterprise (invisible, score-based) — it needs a `--recaptcha-token` captured from a browser (single-use, ~2 min). rdt-cli never solves the captcha.
+**Drafts** save headlessly. **Publishing** is gated behind reCAPTCHA Enterprise (invisible, score-based). Token sources, checked in order: `--recaptcha-token` captured from a browser (single-use, ~2 min), else automatic solving via solvecaptcha.com when `RDT_SOLVECAPTCHA_API_KEY` (or `APIKEY_SOLVECAPTCHA`) is set — the key's presence opts in to a paid solve (~10-60s) right before publishing.
 
 | Command | Description | Example |
 |---------|-------------|---------|
 | `rdt post <sub> <title> --text <body> --draft` | Save a text draft | `rdt post python "WIP" --text "..." --draft` |
 | `rdt post <sub> <title> --url <url> --draft` | Save a link draft | `rdt post news "Read" --url https://ex.com --draft` |
-| `rdt post <sub> <title> --text <body> --recaptcha-token <tok>` | Publish text post | `rdt post python "Hi" --text "..." --recaptcha-token <tok>` |
-| `rdt post <sub> <title> --image <file> --recaptcha-token <tok>` | Publish image post | `rdt post pics "Cat" --image cat.jpg --recaptcha-token <tok>` |
+| `rdt post <sub> <title> --text <body> --recaptcha-token <tok>` | Publish text post (browser token) | `rdt post python "Hi" --text "..." --recaptcha-token <tok>` |
+| `rdt post <sub> <title> --image <file>` | Publish image post (captcha auto-solved if key set) | `rdt post pics "Cat" --image cat.jpg` |
 
-Optional flags: `--nsfw`, `--spoiler`. Notes: Reddit drafts can't store images (text/link only); `--image` requires publishing with a token.
+Optional flags: `--nsfw`, `--spoiler`. Notes: Reddit drafts can't store images (text/link only); `--image` requires publishing with a token (flag or solver).
 
 ### Account
 

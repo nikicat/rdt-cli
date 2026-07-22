@@ -2,10 +2,15 @@
 
 Reddit's web GraphQL (see rdt_cli.client) lets us create **drafts** headlessly,
 but **publishing** a post is gated behind reCAPTCHA Enterprise (invisible,
-score-based, action ``post_submit``). A valid token can only be produced by a
-real browser, so publishing requires the caller to pass ``--recaptcha-token``
-(obtained from DevTools, single-use, ~2 min TTL). The tool never solves the
-captcha itself. Without a token, use ``--draft``.
+score-based, action ``post_submit``). A valid token can come from two sources:
+
+1. ``--recaptcha-token`` — captured from a real browser (DevTools, single-use,
+   ~2 min TTL), or
+2. automatic solving — when a Solvecaptcha API key is configured (env
+   ``RDT_SOLVECAPTCHA_API_KEY`` or ``APIKEY_SOLVECAPTCHA``), a token is bought
+   from solvecaptcha.com just before publishing (see rdt_cli.captcha).
+
+Without either, use ``--draft``.
 """
 
 from __future__ import annotations
@@ -14,6 +19,7 @@ from typing import Any
 
 import click
 
+from ..captcha import get_solvecaptcha_api_key, solve_recaptcha_token
 from ..client import RedditClient
 from ..constants import BASE_URL
 from ..exceptions import RedditApiError
@@ -56,8 +62,10 @@ def _permalink_from(data: Any) -> str | None:
 _RECAPTCHA_HELP = (
     "Publishing requires a reCAPTCHA Enterprise token — Reddit gates post "
     "submission with invisible, score-based reCAPTCHA (action 'post_submit'). "
-    "A token can only be produced by a browser (single-use, ~2 min). Pass it via "
-    "--recaptcha-token, or use --draft to save a draft headlessly."
+    "Either pass a browser-captured token via --recaptcha-token (single-use, "
+    "~2 min), or set a Solvecaptcha API key (env RDT_SOLVECAPTCHA_API_KEY or "
+    "APIKEY_SOLVECAPTCHA) to buy a token automatically. Without either, use "
+    "--draft to save a draft headlessly."
 )
 
 
@@ -75,7 +83,8 @@ _RECAPTCHA_HELP = (
 @click.option("--draft", is_flag=True, help="Save as a draft instead of publishing (text/link only)")
 @click.option(
     "--recaptcha-token", "recaptcha_token", default=None,
-    help="reCAPTCHA Enterprise token from a browser (required to publish)",
+    help="reCAPTCHA Enterprise token from a browser (otherwise a token is "
+         "bought via Solvecaptcha when an API key is configured)",
 )
 @click.option("--nsfw", is_flag=True, help="Mark as NSFW")
 @click.option("--spoiler", is_flag=True, help="Mark as spoiler")
@@ -98,13 +107,15 @@ def post(
     Provide exactly one of --text, --url, or --image.
 
     Drafts (--draft) are created headlessly. Publishing is gated behind reCAPTCHA
-    Enterprise, so it needs a --recaptcha-token captured from a browser.
+    Enterprise: pass a browser-captured --recaptcha-token, or set a Solvecaptcha
+    API key (env RDT_SOLVECAPTCHA_API_KEY or APIKEY_SOLVECAPTCHA) and a token is
+    bought automatically right before publishing.
 
     Examples:
       rdt post python "My title" --text "Hello **world**" --draft
       rdt post news "Interesting" --url https://example.com --draft
       rdt post pics "My cat" --image cat.jpg --recaptcha-token <token>
-      rdt post u_myname "On my profile" --text "hi" --recaptcha-token <token>
+      rdt post u_myname "On my profile" --text "hi"   # solves via Solvecaptcha
     """
     provided = [
         name for name, given in
@@ -119,10 +130,17 @@ def post(
         raise click.UsageError(
             "--image cannot be combined with --draft: Reddit drafts cannot store "
             "images (the image only attaches at publish time). Publish it with "
-            "--recaptcha-token, or draft text/link only."
+            "--recaptcha-token (or a configured Solvecaptcha API key), or draft "
+            "text/link only."
         )
+
+    # Token source for publishing: explicit flag wins; otherwise a Solvecaptcha
+    # API key must be configured (a token is bought just before publishing).
+    solver_api_key: str | None = None
     if not draft and not recaptcha_token:
-        raise click.UsageError(_RECAPTCHA_HELP)
+        solver_api_key = get_solvecaptcha_api_key()
+        if not solver_api_key:
+            raise click.UsageError(_RECAPTCHA_HELP)
 
     is_profile = subreddit.lower().startswith("u_")
 
@@ -138,8 +156,15 @@ def post(
                 action = "Draft saved"
             else:
                 media_id = client.upload_image(image) if image is not None else None
+                if recaptcha_token is None:
+                    # Solve last — the token is single-use with a ~2 min TTL.
+                    console.print(
+                        "[dim]⏳ Solving reCAPTCHA Enterprise via solvecaptcha.com "
+                        "(paid, usually ~10-60s)…[/dim]"
+                    )
+                    recaptcha_token = solve_recaptcha_token(solver_api_key or "")
                 data = client.create_post(
-                    subreddit_id, title, recaptcha_token=recaptcha_token or "", kind=kind,
+                    subreddit_id, title, recaptcha_token=recaptcha_token, kind=kind,
                     body=text, url=link_url, media_id=media_id, nsfw=nsfw, spoiler=spoiler,
                     is_profile=is_profile,
                 )

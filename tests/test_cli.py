@@ -1022,7 +1022,8 @@ class TestPostCommand:
 
     def test_publish_requires_recaptcha_token(self):
         cred = self._cred()
-        with patch("rdt_cli.commands._common.get_credential", return_value=cred):
+        with patch("rdt_cli.commands._common.get_credential", return_value=cred), \
+             patch("rdt_cli.commands.submit.get_solvecaptcha_api_key", return_value=None):
             result = runner.invoke(cli, ["post", "test", "T", "--text", "hi"])
             assert result.exit_code == 2
             assert "reCAPTCHA" in result.output
@@ -1042,6 +1043,60 @@ class TestPostCommand:
             assert kwargs["kind"] == "self"
             assert kwargs["recaptcha_token"] == "TOK"
             assert kwargs["is_profile"] is False
+
+    def test_publish_solves_captcha_with_api_key(self):
+        cred = self._cred()
+        with patch("rdt_cli.commands._common.get_credential", return_value=cred), \
+             patch("rdt_cli.commands.submit.write_delay"), \
+             patch("rdt_cli.commands.submit.get_solvecaptcha_api_key", return_value="KEY"), \
+             patch("rdt_cli.commands.submit.solve_recaptcha_token", return_value="SOLVED") as mock_solve, \
+             patch("rdt_cli.client.RedditClient.validate_session", return_value={}), \
+             patch("rdt_cli.client.RedditClient.resolve_subreddit_id", return_value="t5_abc"), \
+             patch("rdt_cli.client.RedditClient.create_post", return_value={}) as mock_post:
+            result = runner.invoke(cli, ["post", "test", "T", "--text", "hi", "--json"])
+            assert result.exit_code == 0, result.output
+            mock_solve.assert_called_once_with("KEY")
+            _, kwargs = mock_post.call_args
+            assert kwargs["recaptcha_token"] == "SOLVED"
+
+    def test_explicit_token_skips_solver(self):
+        cred = self._cred()
+        with patch("rdt_cli.commands._common.get_credential", return_value=cred), \
+             patch("rdt_cli.commands.submit.write_delay"), \
+             patch("rdt_cli.commands.submit.get_solvecaptcha_api_key", return_value="KEY"), \
+             patch("rdt_cli.commands.submit.solve_recaptcha_token") as mock_solve, \
+             patch("rdt_cli.client.RedditClient.validate_session", return_value={}), \
+             patch("rdt_cli.client.RedditClient.resolve_subreddit_id", return_value="t5_abc"), \
+             patch("rdt_cli.client.RedditClient.create_post", return_value={}) as mock_post:
+            result = runner.invoke(
+                cli, ["post", "test", "T", "--text", "hi", "--recaptcha-token", "TOK", "--json"]
+            )
+            assert result.exit_code == 0, result.output
+            mock_solve.assert_not_called()
+            _, kwargs = mock_post.call_args
+            assert kwargs["recaptcha_token"] == "TOK"
+
+    def test_solver_failure_is_an_error(self):
+        from rdt_cli.captcha import CaptchaSolveError
+
+        cred = self._cred()
+        with patch("rdt_cli.commands._common.get_credential", return_value=cred), \
+             patch("rdt_cli.commands.submit.write_delay"), \
+             patch("rdt_cli.commands.submit.get_solvecaptcha_api_key", return_value="KEY"), \
+             patch(
+                 "rdt_cli.commands.submit.solve_recaptcha_token",
+                 side_effect=CaptchaSolveError("ERROR_ZERO_BALANCE"),
+             ), \
+             patch("rdt_cli.client.RedditClient.validate_session", return_value={}), \
+             patch("rdt_cli.client.RedditClient.resolve_subreddit_id", return_value="t5_abc"), \
+             patch("rdt_cli.client.RedditClient.create_post") as mock_post:
+            result = runner.invoke(cli, ["post", "test", "T", "--text", "hi", "--json"])
+            assert result.exit_code == 1
+            mock_post.assert_not_called()
+            # Structured error envelope on stdout (CliRunner also mixes in the
+            # stderr "Solving…" status line, so assert on the payload text).
+            assert '"ok": false' in result.output
+            assert "Captcha solving failed" in result.output
 
     def test_image_publish_with_token(self, tmp_path):
         cred = self._cred()
@@ -1212,4 +1267,107 @@ class TestClientPostMethods:
         _, kwargs = mock_s3.call_args
         assert kwargs["data"] == {"key": "abc"}
         assert "file" in kwargs["files"]
+
+
+# ── Captcha solving via Solvecaptcha (mocked HTTP) ──────────────────
+
+
+class TestCaptchaSolver:
+    """Test rdt_cli.captcha against a mocked Solvecaptcha API (MockTransport)."""
+
+    def _run_solver(self, handler, **kwargs):
+        import httpx
+
+        from rdt_cli.captcha import solve_recaptcha_token
+
+        real_client = httpx.Client  # capture before patching (same module object)
+
+        def client_factory(**client_kwargs):
+            return real_client(transport=httpx.MockTransport(handler), **client_kwargs)
+
+        with patch("rdt_cli.captcha.httpx.Client", new=client_factory), \
+             patch("rdt_cli.captcha.time.sleep"):
+            return solve_recaptcha_token("KEY", **kwargs)
+
+    def test_solve_success(self):
+        from urllib.parse import parse_qs
+
+        import httpx
+
+        polls = {"n": 0}
+        submitted = {}
+
+        def handler(request):
+            if request.url.path == "/in.php":
+                submitted.update(parse_qs(request.content.decode()))
+                return httpx.Response(200, text="OK|task123")
+            polls["n"] += 1
+            if polls["n"] == 1:
+                return httpx.Response(200, text="CAPCHA_NOT_READY")
+            return httpx.Response(200, text="OK|TOKEN123")
+
+        token = self._run_solver(handler)
+        assert token == "TOKEN123"
+        assert polls["n"] == 2
+        # Task submitted as a score-based Enterprise reCAPTCHA (v3 + enterprise=1)
+        assert submitted["key"] == ["KEY"]
+        assert submitted["method"] == ["userrecaptcha"]
+        assert submitted["googlekey"] == ["6LfirrMoAAAAAHZOipvza4kpp_VtTwLNuXVwURNQ"]
+        assert submitted["version"] == ["v3"]
+        assert submitted["enterprise"] == ["1"]
+        assert submitted["action"] == ["post_submit"]
+        assert submitted["min_score"] == ["0.3"]
+
+    def test_submit_rejected(self):
+        import httpx
+
+        from rdt_cli.captcha import CaptchaSolveError
+
+        def handler(request):
+            return httpx.Response(200, text="ERROR_ZERO_BALANCE")
+
+        with pytest.raises(CaptchaSolveError, match="ERROR_ZERO_BALANCE"):
+            self._run_solver(handler)
+
+    def test_poll_service_error(self):
+        import httpx
+
+        from rdt_cli.captcha import CaptchaSolveError
+
+        def handler(request):
+            if request.url.path == "/in.php":
+                return httpx.Response(200, text="OK|task123")
+            return httpx.Response(200, text="ERROR_WRONG_CAPTCHA_ID")
+
+        with pytest.raises(CaptchaSolveError, match="ERROR_WRONG_CAPTCHA_ID"):
+            self._run_solver(handler)
+
+    def test_timeout(self):
+        import httpx
+
+        from rdt_cli.captcha import CaptchaSolveError
+
+        def handler(request):
+            if request.url.path == "/in.php":
+                return httpx.Response(200, text="OK|task123")
+            return httpx.Response(200, text="CAPCHA_NOT_READY")
+
+        with pytest.raises(CaptchaSolveError, match="no solution"):
+            self._run_solver(handler, timeout=0.01, polling_interval=0.001)
+
+    def test_api_key_env_priority(self):
+        import os
+
+        from rdt_cli.captcha import get_solvecaptcha_api_key
+
+        with patch.dict(os.environ, {}, clear=True):
+            assert get_solvecaptcha_api_key() is None
+        with patch.dict(os.environ, {"APIKEY_SOLVECAPTCHA": "pkg-key"}, clear=True):
+            assert get_solvecaptcha_api_key() == "pkg-key"
+        with patch.dict(
+            os.environ,
+            {"RDT_SOLVECAPTCHA_API_KEY": "rdt-key", "APIKEY_SOLVECAPTCHA": "pkg-key"},
+            clear=True,
+        ):
+            assert get_solvecaptcha_api_key() == "rdt-key"
 

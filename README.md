@@ -28,7 +28,7 @@ A CLI for Reddit — browse feeds, read posts, search, and interact via reverse-
 - 📤 **Export** — export search results to CSV or JSON; `-o file.json` on any listing
 - 👤 **Users** — view user profiles, post history, comment history, saved and upvoted items
 - ⬆️ **Interactions** — upvote/downvote, save/unsave, subscribe/unsubscribe, comment (with 1.5-4s rate-limit delay)
-- ✍️ **Create posts** — save text/link **drafts** headlessly (`rdt post --draft`); publishing is reCAPTCHA-gated and needs a browser token (`--recaptcha-token`)
+- ✍️ **Create posts** — save text/link **drafts** headlessly (`rdt post --draft`); publish text/link/image posts with a browser reCAPTCHA token (`--recaptcha-token`) or automatic solving via solvecaptcha.com
 - 🛡️ **Anti-detection** — consistent Chrome 133 fingerprint, `sec-ch-ua` alignment, Gaussian jitter, exponential backoff
 - 📊 **Structured output** — `--yaml`, `--json`, `--output FILE`, `--compact`, `--full-text`
 - 📦 **Stable envelope** — see [SCHEMA.md](./SCHEMA.md) for `ok/schema_version/data/error`
@@ -123,18 +123,23 @@ rdt subscribe python --undo           # Unsubscribe
 rdt comment 3 "Great post!"           # Comment on result #3
 
 # ─── Create posts (require login) ─────────────────
-# Drafts save headlessly. Publishing is gated behind reCAPTCHA Enterprise, so it
-# needs a --recaptcha-token captured from a browser (single-use, ~2 min).
+# Drafts save headlessly. Publishing is gated behind reCAPTCHA Enterprise:
+# either pass --recaptcha-token from a browser (single-use, ~2 min), or set
+# RDT_SOLVECAPTCHA_API_KEY (or APIKEY_SOLVECAPTCHA) and a token is bought from
+# solvecaptcha.com automatically right before publishing (paid, ~10-60s).
 rdt post python "WIP title" --text "Hello **world**" --draft   # Save a text draft
 rdt post news "Cool read" --url https://example.com --draft    # Save a link draft
 rdt post python "Title" --text "body" --recaptcha-token <tok>  # Publish text post
-rdt post pics "My cat" --image cat.jpg --recaptcha-token <tok> # Publish image post
-rdt post u_yourname "On my profile" --text "hi" --recaptcha-token <tok>
+rdt post pics "My cat" --image cat.jpg                         # Publish image (captcha auto-solved)
+rdt post u_yourname "On my profile" --text "hi"                # Publish to profile
 ```
 
 > **Note:** Reddit drafts store text/link only — not images (image drafts aren't
-> supported by Reddit). And publishing any post requires a reCAPTCHA Enterprise
-> token that only a browser can produce; rdt-cli never solves the captcha.
+> supported by Reddit). Publishing any post requires a reCAPTCHA Enterprise
+> token: capture one from a browser, or let rdt-cli buy one via
+> [Solvecaptcha](https://solvecaptcha.com) — set `RDT_SOLVECAPTCHA_API_KEY` or
+> `APIKEY_SOLVECAPTCHA` (its 2captcha-compatible API is called directly over
+> httpx, so no extra dependencies). Each solve is a paid API call (~10-60s).
 
 ## Authentication
 
@@ -163,6 +168,8 @@ After any listing command such as `feed`, `popular`, `all`, `sub`, or `search`, 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `OUTPUT` | `auto` | Output format: `json`, `yaml`, `rich`, or `auto` (→ YAML when non-TTY) |
+| `RDT_SOLVECAPTCHA_API_KEY` | — | Solvecaptcha API key — enables automatic reCAPTCHA solving when publishing posts |
+| `APIKEY_SOLVECAPTCHA` | — | Fallback for the above (solvecaptcha-python's own convention) |
 
 ## Rate Limiting & Anti-Detection
 
@@ -224,6 +231,7 @@ rdt_cli/
 ├── cli.py                # Click entry point & command registration
 ├── client.py             # Reddit API client (rate-limit, retry, anti-detection)
 ├── auth.py               # Cookie authentication + TTL refresh
+├── captcha.py            # reCAPTCHA Enterprise solving via the Solvecaptcha API
 ├── constants.py          # URLs, headers, sort options
 ├── exceptions.py         # Error hierarchy (6 exception types)
 ├── index_cache.py        # Short-index cache for show/open commands
