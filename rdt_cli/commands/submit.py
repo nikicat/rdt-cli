@@ -29,11 +29,39 @@ from ..richtext import build_rtjson
 from ._common import (
     console,
     exit_for_error,
+    handle_command,
     maybe_print_structured,
     require_auth,
     structured_output_options,
     write_delay,
 )
+
+
+@click.command()
+@click.argument("subreddit")
+@structured_output_options
+def flairs(subreddit: str, as_json: bool, as_yaml: bool) -> None:
+    """List a subreddit's post flair templates (for `rdt post --flair-id`).
+
+    Some communities require post flair; pick a template id here and pass it
+    via --flair-id when publishing.
+    """
+    cred = require_auth()
+
+    def _render(data: list[dict]) -> None:
+        if not data:
+            console.print("[dim]No selectable post flairs.[/dim]")
+            return
+        for f in data:
+            editable = " [dim](text editable)[/dim]" if f.get("text_editable") else ""
+            text = f.get("text") or "[yellow](no default text — pass --flair-text or the flair shows blank)[/yellow]"
+            console.print(f"[bold cyan]{f.get('id', '')}[/bold cyan]  {text}{editable}")
+
+    handle_command(
+        cred,
+        action=lambda c: c.get_link_flairs(subreddit),
+        render=_render, as_json=as_json, as_yaml=as_yaml,
+    )
 
 
 def _find_first(obj: Any, keys: set[str]) -> str | None:
@@ -111,6 +139,14 @@ _RECAPTCHA_HELP = (
     help="reCAPTCHA Enterprise token from a browser (otherwise a token is "
          "bought via Solvecaptcha when an API key is configured)",
 )
+@click.option(
+    "--flair-id", "flair_id", default=None,
+    help="Post flair template id (see `rdt flairs <subreddit>`; publish only)",
+)
+@click.option(
+    "--flair-text", "flair_text", default=None,
+    help="Custom flair text (only for text-editable flair templates)",
+)
 @click.option("--nsfw", is_flag=True, help="Mark as NSFW")
 @click.option("--spoiler", is_flag=True, help="Mark as spoiler")
 @structured_output_options
@@ -123,6 +159,8 @@ def post(
     draft: bool,
     embeds: tuple[str, ...],
     recaptcha_token: str | None,
+    flair_id: str | None,
+    flair_text: str | None,
     nsfw: bool,
     spoiler: bool,
     as_json: bool,
@@ -143,12 +181,17 @@ def post(
     API key (env RDT_SOLVECAPTCHA_API_KEY or APIKEY_SOLVECAPTCHA) and a token is
     bought automatically right before publishing.
 
+    Communities that require post flair: list templates with `rdt flairs
+    <subreddit>` and pass --flair-id (plus --flair-text for text-editable
+    templates). Flair applies at publish only, community posts only.
+
     Examples:
       rdt post python "My title" --text "Hello **world**" --draft
       rdt post news "Interesting" --url https://example.com --draft
       rdt post pics "My cat" --image cat.jpg --recaptcha-token <token>
       rdt post python "Guide" --text "step 1 ![img] done" --embed step1.jpg
       rdt post u_myname "On my profile" --text "hi"   # solves via Solvecaptcha
+      rdt post askscience "Q" --text "…" --flair-id 1234-abcd
     """
     provided = [
         name for name, given in
@@ -187,6 +230,11 @@ def post(
             "text/link only."
         )
 
+    if flair_text and not flair_id:
+        raise click.UsageError("--flair-text requires --flair-id (a template id from `rdt flairs`).")
+    if flair_id and draft:
+        raise click.UsageError("Flair applies at publish time — drafts don't store it.")
+
     # Token source for publishing: explicit flag wins; otherwise a Solvecaptcha
     # API key must be configured (a token is bought just before publishing).
     solver_api_key: str | None = None
@@ -196,6 +244,8 @@ def post(
             raise click.UsageError(_RECAPTCHA_HELP)
 
     is_profile = subreddit.lower().startswith("u_")
+    if flair_id and is_profile:
+        raise click.UsageError("Flair is a community feature — profile posts can't take one.")
 
     cred = require_auth()
     try:
@@ -233,6 +283,7 @@ def post(
                 data = client.create_post(
                     subreddit, title, recaptcha_token=recaptcha_token, kind=kind,
                     body=text, url=link_url, media_id=media_id, rich_text=rich_text,
+                    flair_id=flair_id, flair_text=flair_text,
                     nsfw=nsfw, spoiler=spoiler, is_profile=is_profile,
                 )
                 action = "Posted"

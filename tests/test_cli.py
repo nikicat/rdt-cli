@@ -1296,6 +1296,65 @@ class TestPostCommand:
             assert result.exit_code == 2
             assert "draft" in result.output.lower()
 
+    def test_flairs_lists_templates(self):
+        cred = self._cred()
+        templates = [
+            {"id": "aaa-111", "text": "Discussion", "text_editable": False},
+            {"id": "bbb-222", "text": "", "text_editable": True},
+        ]
+        with patch("rdt_cli.commands._common.get_credential", return_value=cred), \
+             patch("rdt_cli.client.RedditClient.get_link_flairs", return_value=templates), \
+             patch("rdt_cli.commands._common.resolve_output_format", return_value=None):
+            result = runner.invoke(cli, ["flairs", "test"])
+            assert result.exit_code == 0, result.output
+            assert "aaa-111" in result.output
+            assert "Discussion" in result.output
+            # empty-default templates apply but render blank — the listing warns
+            assert "no default text" in result.output
+
+    def test_post_with_flair_passes_through(self):
+        cred = self._cred()
+        with patch("rdt_cli.commands._common.get_credential", return_value=cred), \
+             patch("rdt_cli.commands.submit.write_delay"), \
+             patch("rdt_cli.client.RedditClient.validate_session", return_value={}), \
+             patch("rdt_cli.client.RedditClient.create_post", return_value={}) as mock_post:
+            result = runner.invoke(
+                cli, ["post", "test", "T", "--text", "body", "--flair-id", "aaa-111",
+                      "--flair-text", "Custom", "--recaptcha-token", "TOK", "--json"],
+            )
+            assert result.exit_code == 0, result.output
+            _, kwargs = mock_post.call_args
+            assert kwargs["flair_id"] == "aaa-111"
+            assert kwargs["flair_text"] == "Custom"
+
+    def test_flair_text_requires_flair_id(self):
+        cred = self._cred()
+        with patch("rdt_cli.commands._common.get_credential", return_value=cred):
+            result = runner.invoke(
+                cli, ["post", "test", "T", "--text", "body", "--flair-text", "Custom"]
+            )
+            assert result.exit_code == 2
+            assert "--flair-text requires --flair-id" in result.output
+
+    def test_flair_rejected_for_draft(self):
+        cred = self._cred()
+        with patch("rdt_cli.commands._common.get_credential", return_value=cred):
+            result = runner.invoke(
+                cli, ["post", "test", "T", "--text", "body", "--flair-id", "aaa", "--draft"]
+            )
+            assert result.exit_code == 2
+            assert "publish" in result.output.lower()
+
+    def test_flair_rejected_for_profile(self):
+        cred = self._cred()
+        with patch("rdt_cli.commands._common.get_credential", return_value=cred):
+            result = runner.invoke(
+                cli, ["post", "u_me", "T", "--text", "body", "--flair-id", "aaa",
+                      "--recaptcha-token", "TOK"]
+            )
+            assert result.exit_code == 2
+            assert "community" in result.output.lower()
+
     def test_rejects_image_draft(self, tmp_path):
         cred = self._cred()
         img = tmp_path / "pic.png"
@@ -1457,6 +1516,31 @@ class TestClientPostMethods:
                     "url": "https://reddit-uploaded-media.s3-accelerate.amazonaws.com/mid7"
                 }
                 assert "gallery" not in inp
+
+    def test_create_post_with_flair(self):
+        with self._client() as client:
+            with patch.object(client, "_graphql", return_value={}) as g:
+                client.create_post(
+                    "test", "T", recaptcha_token="TOK", kind="self", body="hi",
+                    flair_id="aaa-111", flair_text="Custom",
+                )
+                _, variables = g.call_args.args
+                assert variables["input"]["flair"] == {"id": "aaa-111", "text": "Custom"}
+
+    def test_create_post_without_flair_omits_field(self):
+        with self._client() as client:
+            with patch.object(client, "_graphql", return_value={}) as g:
+                client.create_post("test", "T", recaptcha_token="TOK", kind="self", body="hi")
+                _, variables = g.call_args.args
+                assert "flair" not in variables["input"]
+
+    def test_get_link_flairs(self):
+        templates = [{"id": "aaa", "text": "Discussion", "text_editable": False}]
+        with self._client() as client:
+            with patch.object(client, "_get", return_value=templates) as g:
+                assert client.get_link_flairs("test") == templates
+                url, = g.call_args.args
+                assert url == "/r/test/api/link_flair_v2.json"
 
     def test_create_post_self_rich_text_with_attached_image(self):
         with self._client() as client:

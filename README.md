@@ -134,7 +134,16 @@ rdt post pics "My cat" --image cat.jpg                         # Publish image (
 rdt post u_yourname "On my profile" --text "hi"                # Publish to profile
 rdt post python "Guide" --text "step 1 ![img] done" --embed step1.jpg  # Inline image in a text post
 rdt post python "Report" --text "summary **md**" --image chart.png     # Text post + attached image
+rdt flairs askscience                                          # List post flair templates (id + text)
+rdt post askscience "Q" --text "…" --flair-id <template-id>    # Publish with flair (some subs require it)
 ```
+
+> **Post flair (live-verified):** some communities require flair. `rdt flairs
+> <subreddit>` lists the templates; pass the id via `--flair-id` when
+> publishing (plus `--flair-text` to override text-editable templates).
+> Publish-only, community posts only. Careful: a template with empty default
+> text still applies without `--flair-text`, but renders as a blank
+> (invisible) label — the listing flags such templates.
 
 > **Attached image in a text post:** `--text` + `--image` publishes a markdown
 > text post with the image attached (`image.url` in the mutation input): it

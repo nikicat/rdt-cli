@@ -74,6 +74,7 @@ cli.add_command(social.comment)
 # ─── Create commands ────────────────────────────────────────────────
 
 cli.add_command(submit.post)
+cli.add_command(submit.flairs)
 
 
 if __name__ == "__main__":

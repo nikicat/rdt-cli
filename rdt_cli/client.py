@@ -211,6 +211,16 @@ class RedditClient:
         data = self._get(SUBREDDIT_ABOUT_URL.format(subreddit=subreddit), params={"raw_json": 1})
         return data.get("data", data)
 
+    def get_link_flairs(self, subreddit: str) -> list[dict[str, Any]]:
+        """List a subreddit's post flair templates (``link_flair_v2.json``).
+
+        Returns the raw template list (``id``, ``text``, ``text_editable``, …)
+        for use with post flair selection. Needs auth cookies; communities
+        that disallow user flair selection respond 403.
+        """
+        data = self._get(f"/r/{subreddit}/api/link_flair_v2.json", params={"raw_json": 1})
+        return data if isinstance(data, list) else []
+
     # ── Post / Comments ─────────────────────────────────────────────
 
     def get_post_comments(
@@ -481,6 +491,8 @@ class RedditClient:
         url: str | None = None,
         media_id: str | None = None,
         rich_text: str | None = None,
+        flair_id: str | None = None,
+        flair_text: str | None = None,
         nsfw: bool = False,
         spoiler: bool = False,
         is_profile: bool = False,
@@ -509,6 +521,13 @@ class RedditClient:
         RTJSON canonically and derives the markdown export from it, so ``body``
         is ignored when ``rich_text`` is given. RTJSON is the only way to get
         true inline image blocks — a markdown body renders image links as links.
+
+        ``flair_id`` (a template id from :meth:`get_link_flairs`) attaches post
+        flair, with ``flair_text`` overriding the text for editable templates.
+        Community posts only. Confirmed live: the template id and text land on
+        the post (``link_flair_template_id``/``link_flair_text``). A template
+        with empty default text needs ``flair_text``, else the applied flair
+        renders as a blank label.
         """
         if kind == "self":
             content = {"richText": rich_text} if rich_text else self._markdown_content(body)
@@ -534,6 +553,11 @@ class RedditClient:
             return self._graphql(OP_CREATE_PROFILE_POST, {"input": inp})
 
         inp["subredditName"] = subreddit_name.removeprefix("r/")
+        if flair_id:
+            flair: dict[str, Any] = {"id": flair_id}
+            if flair_text:
+                flair["text"] = flair_text
+            inp["flair"] = flair
         if kind == "image":
             inp["gallery"] = {"items": [{"mediaId": media_id}]}
         return self._graphql(OP_CREATE_POST, {"input": inp})
