@@ -1117,6 +1117,83 @@ class TestPostCommand:
             assert kwargs["kind"] == "image"
             assert kwargs["media_id"] == "media123"
 
+    def test_embed_requires_text_kind(self, tmp_path):
+        cred = self._cred()
+        img = tmp_path / "pic.jpg"
+        img.write_bytes(b"\xff\xd8\xff")
+        with patch("rdt_cli.commands._common.get_credential", return_value=cred):
+            for kind_args in (["--url", "https://e.com"], ["--image", str(img)]):
+                result = runner.invoke(
+                    cli, ["post", "test", "T", *kind_args, "--embed", str(img), "--draft"]
+                )
+                assert result.exit_code == 2
+                assert "--embed only works with --text" in result.output
+
+    def test_embed_marker_count_mismatch(self, tmp_path):
+        cred = self._cred()
+        img = tmp_path / "pic.jpg"
+        img.write_bytes(b"\xff\xd8\xff")
+        with patch("rdt_cli.commands._common.get_credential", return_value=cred):
+            result = runner.invoke(
+                cli, ["post", "test", "T", "--text", "no markers", "--embed", str(img), "--draft"]
+            )
+            assert result.exit_code == 2
+            assert "![img]" in result.output
+
+    def test_embed_marker_without_embed(self):
+        cred = self._cred()
+        with patch("rdt_cli.commands._common.get_credential", return_value=cred):
+            result = runner.invoke(
+                cli, ["post", "test", "T", "--text", "look ![img] here", "--draft"]
+            )
+            assert result.exit_code == 2
+            assert "no --embed" in result.output
+
+    def test_embed_publish_substitutes_markers(self, tmp_path):
+        cred = self._cred()
+        img = tmp_path / "cat pic.jpg"
+        img.write_bytes(b"\xff\xd8\xff")
+        with patch("rdt_cli.commands._common.get_credential", return_value=cred), \
+             patch("rdt_cli.commands.submit.write_delay"), \
+             patch("rdt_cli.client.RedditClient.validate_session", return_value={}), \
+             patch("rdt_cli.client.RedditClient.resolve_subreddit_id", return_value="t5_abc"), \
+             patch(
+                 "rdt_cli.client.RedditClient.upload_image_as_embed",
+                 return_value="https://i.redd.it/mid1.jpg",
+             ) as mock_up, \
+             patch("rdt_cli.client.RedditClient.create_post", return_value={}) as mock_post:
+            result = runner.invoke(
+                cli,
+                ["post", "test", "T", "--text", "before ![img] after",
+                 "--embed", str(img), "--recaptcha-token", "TOK", "--json"],
+            )
+            assert result.exit_code == 0, result.output
+            mock_up.assert_called_once_with(str(img))
+            _, kwargs = mock_post.call_args
+            assert kwargs["kind"] == "self"
+            assert kwargs["body"] == "before [cat pic](https://i.redd.it/mid1.jpg) after"
+            assert "![img]" not in kwargs["body"]
+
+    def test_embed_draft_substitutes_markers(self, tmp_path):
+        cred = self._cred()
+        img = tmp_path / "pic.png"
+        img.write_bytes(b"\x89PNG\r\n\x1a\n")
+        with patch("rdt_cli.commands._common.get_credential", return_value=cred), \
+             patch("rdt_cli.commands.submit.write_delay"), \
+             patch("rdt_cli.client.RedditClient.validate_session", return_value={}), \
+             patch("rdt_cli.client.RedditClient.resolve_subreddit_id", return_value="t5_abc"), \
+             patch(
+                 "rdt_cli.client.RedditClient.upload_image_as_embed",
+                 return_value="https://i.redd.it/mid2.png",
+             ), \
+             patch("rdt_cli.client.RedditClient.create_draft", return_value={}) as mock_draft:
+            result = runner.invoke(
+                cli, ["post", "test", "T", "--text", "see ![img]", "--embed", str(img), "--draft", "--json"]
+            )
+            assert result.exit_code == 0, result.output
+            _, kwargs = mock_draft.call_args
+            assert kwargs["body"] == "see [pic](https://i.redd.it/mid2.png)"
+
     def test_profile_publish_uses_profile_flag(self):
         cred = self._cred()
         with patch("rdt_cli.commands._common.get_credential", return_value=cred), \
@@ -1267,6 +1344,16 @@ class TestClientPostMethods:
         _, kwargs = mock_s3.call_args
         assert kwargs["data"] == {"key": "abc"}
         assert "file" in kwargs["files"]
+
+    def test_upload_image_as_embed(self, tmp_path):
+        for name, ext in (("pic.jpg", "jpg"), ("pic.jpeg", "jpg"), ("pic.png", "png"), ("pic.webp", "webp")):
+            img = tmp_path / name
+            img.write_bytes(b"\x00")
+            with self._client() as client:
+                with patch.object(client, "upload_image", return_value="mid42") as mock_up:
+                    url = client.upload_image_as_embed(str(img))
+            assert url == f"https://i.redd.it/mid42.{ext}"
+            mock_up.assert_called_once_with(str(img))
 
 
 # ── Captcha solving via Solvecaptcha (mocked HTTP) ──────────────────

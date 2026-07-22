@@ -132,7 +132,13 @@ rdt post news "Cool read" --url https://example.com --draft    # Save a link dra
 rdt post python "Title" --text "body" --recaptcha-token <tok>  # Publish text post
 rdt post pics "My cat" --image cat.jpg                         # Publish image (captcha auto-solved)
 rdt post u_yourname "On my profile" --text "hi"                # Publish to profile
+rdt post python "Guide" --text "step 1 ![img] done" --embed step1.jpg  # Inline image in a text post
 ```
+
+> **Inline images in text posts:** each `--embed FILE` uploads an image and
+> replaces one `![img]` marker in `--text` (markers are substituted in order).
+> The body then links the Reddit-hosted image (`https://i.redd.it/<id>.<ext>`,
+> which serves unsigned — `preview.redd.it` URLs don't).
 
 > **Note:** Reddit drafts store text/link only — not images (image drafts aren't
 > supported by Reddit). Publishing any post requires a reCAPTCHA Enterprise

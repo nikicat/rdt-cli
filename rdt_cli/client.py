@@ -18,7 +18,9 @@ from .constants import (
     DEFAULT_LIMIT,
     GRAPHQL_URL,
     HOME_URL,
+    IMAGE_MIME_TO_EXT,
     IMAGE_MIME_TYPES,
+    MEDIA_CDN_HOST,
     MEDIA_S3_HOST,
     MORECHILDREN_URL,
     OP_CREATE_DRAFT,
@@ -454,6 +456,20 @@ class RedditClient:
         if resp.status_code not in (200, 201):
             raise RedditApiError(f"Image upload failed (HTTP {resp.status_code})")
         return media_id
+
+    def upload_image_as_embed(self, path: str) -> str:
+        """Upload an image and return its CDN URL for inline embeds in self-posts.
+
+        A self-post can't hold media directly, but its markdown can reference
+        Reddit-hosted images: ``https://i.redd.it/<mediaId>.<ext>`` serves
+        unsigned (unlike ``preview.redd.it`` URLs, whose ``s=`` param is a
+        signature). New Reddit is expected to render such links inline, as it
+        does for editor-uploaded embeds (live verification pending).
+        """
+        media_id = self.upload_image(path)
+        content_type, _ = mimetypes.guess_type(Path(path).name)
+        ext = IMAGE_MIME_TO_EXT.get(content_type or "", "jpg")
+        return f"{MEDIA_CDN_HOST}/{media_id}.{ext}"
 
     def create_post(
         self,

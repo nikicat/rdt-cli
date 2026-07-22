@@ -67,6 +67,11 @@ OP_MEDIA_LEASE = "CreateMediaUploadLease"
 # S3 host that serves uploaded media; the object URL is "<host>/<mediaId>".
 MEDIA_S3_HOST = "https://reddit-uploaded-media.s3-accelerate.amazonaws.com"
 
+# CDN host that serves uploaded media as "<host>/<mediaId>.<ext>" WITHOUT a
+# signature — used for inline image embeds in self-post markdown. (Unsigned
+# preview.redd.it URLs return 403: the "s=" query param there is a signature.)
+MEDIA_CDN_HOST = "https://i.redd.it"
+
 # ── reCAPTCHA Enterprise (post publishing) ──────────────────────────
 # Reddit gates post publishing (CreatePost/CreateProfilePost) behind reCAPTCHA
 # Enterprise: invisible, score-based. RECAPTCHA_SITEKEY is Reddit's public web
@@ -92,6 +97,14 @@ IMAGE_MIME_TYPES = {
     "image/jpeg",
     "image/gif",
     "image/webp",
+}
+
+# MIME → file extension for media URLs (Reddit uses "jpg" for JPEGs).
+IMAGE_MIME_TO_EXT = {
+    "image/jpeg": "jpg",
+    "image/png": "png",
+    "image/gif": "gif",
+    "image/webp": "webp",
 }
 
 # ── Request Headers (Chrome 133, macOS) ─────────────────────────────

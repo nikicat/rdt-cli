@@ -16,6 +16,7 @@ Without either, use ``--draft``.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import click
@@ -60,6 +61,20 @@ def _permalink_from(data: Any) -> str | None:
     return permalink
 
 
+def _embed_images(text: str, embeds: tuple[str, ...], urls: list[str]) -> str:
+    """Replace each ``![img]`` marker with a markdown link to an uploaded image.
+
+    Markers are substituted in order: the Nth ``![img]`` becomes
+    ``[<file stem>](<cdn url>)`` for the Nth --embed file.
+    """
+    parts = text.split("![img]")
+    out = [parts[0]]
+    for embed, url, tail in zip(embeds, urls, parts[1:], strict=True):
+        out.append(f"[{Path(embed).stem}]({url})")
+        out.append(tail)
+    return "".join(out)
+
+
 _RECAPTCHA_HELP = (
     "Publishing requires a reCAPTCHA Enterprise token — Reddit gates post "
     "submission with invisible, score-based reCAPTCHA (action 'post_submit'). "
@@ -84,6 +99,12 @@ _RECAPTCHA_HELP = (
 )
 @click.option("--draft", is_flag=True, help="Save as a draft instead of publishing (text/link only)")
 @click.option(
+    "--embed", "embeds",
+    multiple=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Image to embed inline in the --text body; one per ![img] marker, in order",
+)
+@click.option(
     "--recaptcha-token", "recaptcha_token", default=None,
     help="reCAPTCHA Enterprise token from a browser (otherwise a token is "
          "bought via Solvecaptcha when an API key is configured)",
@@ -98,6 +119,7 @@ def post(
     link_url: str | None,
     image: str | None,
     draft: bool,
+    embeds: tuple[str, ...],
     recaptcha_token: str | None,
     nsfw: bool,
     spoiler: bool,
@@ -106,7 +128,9 @@ def post(
 ) -> None:
     """Create a post in a subreddit or profile (u_<name>): text, link, or image.
 
-    Provide exactly one of --text, --url, or --image.
+    Provide exactly one of --text, --url, or --image. With --text, --embed
+    uploads an image and substitutes it for an ![img] marker in the body
+    (one marker per --embed, in order), giving inline images in a text post.
 
     Drafts (--draft) are created headlessly. Publishing is gated behind reCAPTCHA
     Enterprise: pass a browser-captured --recaptcha-token, or set a Solvecaptcha
@@ -117,6 +141,7 @@ def post(
       rdt post python "My title" --text "Hello **world**" --draft
       rdt post news "Interesting" --url https://example.com --draft
       rdt post pics "My cat" --image cat.jpg --recaptcha-token <token>
+      rdt post python "Guide" --text "step 1 ![img] done" --embed step1.jpg
       rdt post u_myname "On my profile" --text "hi"   # solves via Solvecaptcha
     """
     provided = [
@@ -127,6 +152,23 @@ def post(
     if len(provided) != 1:
         raise click.UsageError("Provide exactly one of --text, --url, or --image.")
     kind = {"--text": "self", "--url": "link", "--image": "image"}[provided[0]]
+
+    if embeds and kind != "self":
+        raise click.UsageError(
+            "--embed only works with --text (inline images live in the self-post body)."
+        )
+    markers = text.count("![img]") if text else 0
+    if embeds and markers != len(embeds):
+        raise click.UsageError(
+            f"--embed was given {len(embeds)} image(s) but the --text body has "
+            f"{markers} ![img] marker(s). Place one ![img] marker per embedded "
+            "image, in order."
+        )
+    if markers and not embeds:
+        raise click.UsageError(
+            f"The --text body has {markers} ![img] marker(s) but no --embed was "
+            "given. Pass one --embed <file> per marker, or remove the markers."
+        )
 
     if draft and kind == "image":
         raise click.UsageError(
@@ -151,6 +193,10 @@ def post(
         with RedditClient(cred) as client:
             client.validate_session()
             subreddit_id = client.resolve_subreddit_id(subreddit)
+            if embeds:
+                console.print(f"[dim]⏳ Uploading {len(embeds)} embedded image(s)…[/dim]")
+                urls = [client.upload_image_as_embed(embed) for embed in embeds]
+                text = _embed_images(text or "", embeds, urls)
             if draft:
                 data = client.create_draft(
                     subreddit_id, title, body=text, url=link_url, nsfw=nsfw, spoiler=spoiler,

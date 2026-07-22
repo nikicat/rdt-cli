@@ -138,8 +138,9 @@ Exactly one of `--text` / `--url` / `--image`. Target a subreddit or a profile (
 | `rdt post <sub> <title> --url <url> --draft` | Save a link draft | `rdt post news "Read" --url https://ex.com --draft` |
 | `rdt post <sub> <title> --text <body> --recaptcha-token <tok>` | Publish text post (browser token) | `rdt post python "Hi" --text "..." --recaptcha-token <tok>` |
 | `rdt post <sub> <title> --image <file>` | Publish image post (captcha auto-solved if key set) | `rdt post pics "Cat" --image cat.jpg` |
+| `rdt post <sub> <title> --text <body> --embed <file>` | Text post with inline image(s) | `rdt post python "Guide" --text "step 1 ![img]" --embed s1.jpg` |
 
-Optional flags: `--nsfw`, `--spoiler`. Notes: Reddit drafts can't store images (text/link only); `--image` requires publishing with a token (flag or solver).
+Optional flags: `--nsfw`, `--spoiler`. Notes: Reddit drafts can't store images (text/link only); `--image` requires publishing with a token (flag or solver). `--embed` needs one `![img]` marker per file in `--text` (substituted in order); the uploaded image is linked as `https://i.redd.it/<id>.<ext>`.
 
 ### Account
 
