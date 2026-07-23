@@ -16,6 +16,7 @@ from .constants import (
     BASE_URL,
     COMMENT_URL,
     DEFAULT_LIMIT,
+    DEL_URL,
     GRAPHQL_URL,
     HOME_URL,
     IMAGE_MIME_TO_EXT,
@@ -377,6 +378,10 @@ class RedditClient:
     def unsave_item(self, fullname: str) -> dict:
         """Unsave a post or comment."""
         return self._post(UNSAVE_URL, data={"id": fullname})
+
+    def delete_item(self, fullname: str) -> dict:
+        """Delete your own post (t3_*) or comment (t1_*). Irreversible."""
+        return self._post(DEL_URL, data={"id": fullname})
 
     def subscribe(self, subreddit: str, action: str = "sub") -> dict:
         """Subscribe or unsubscribe. action: 'sub' or 'unsub'."""

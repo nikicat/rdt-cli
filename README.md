@@ -122,6 +122,7 @@ rdt save 3 --undo                     # Unsave
 rdt subscribe python                  # Subscribe to r/python
 rdt subscribe python --undo           # Unsubscribe
 rdt comment 3 "Great post!"           # Comment on result #3
+rdt delete 1abc123 -y                 # Delete your own post (t1_… for comments)
 
 # ─── Create posts (require login) ─────────────────
 # Drafts save headlessly. Publishing is gated behind reCAPTCHA Enterprise:
@@ -293,7 +294,7 @@ rdt_cli/
     ├── browse.py         # feed, popular, all, sub, sub-info, rules, user, user-posts, user-comments, saved, upvoted, open
     ├── post.py           # read, show
     ├── search.py         # search, export
-    ├── social.py         # upvote, save, subscribe, comment
+    ├── social.py         # upvote, save, subscribe, comment, delete
     └── submit.py         # post (text/link/image, drafts)
 ```
 
@@ -433,6 +434,7 @@ rdt upvote 3                          # 点赞
 rdt save 3                            # 收藏
 rdt subscribe python                  # 订阅
 rdt comment 3 "Great post!"           # 评论
+rdt delete 1abc123 -y                 # 删除自己的帖子/评论
 ```
 
 ## 认证策略

@@ -36,7 +36,7 @@ class TestCliBasic:
             "user-posts", "user-comments", "saved", "upvoted", "open",
             "read", "show",
             "search", "export",
-            "upvote", "save", "subscribe", "comment",
+            "upvote", "save", "subscribe", "comment", "delete",
             "post",
         ]
         for cmd in expected:
@@ -70,7 +70,7 @@ class TestCommandHelp:
             "user-posts", "user-comments", "saved", "upvoted", "open",
             "read", "show",
             "search", "export",
-            "upvote", "save", "subscribe", "comment",
+            "upvote", "save", "subscribe", "comment", "delete",
             "post",
         ],
     )
@@ -718,6 +718,35 @@ class TestMockedBrowse:
                 with patch("rdt_cli.client.RedditClient.get_user_upvoted", return_value=self._mock_listing()):
                     result = runner.invoke(cli, ["upvoted", "--json"])
                     assert result.exit_code == 0
+
+    def test_delete_mocked(self):
+        from unittest.mock import MagicMock
+
+        from rdt_cli.auth import Credential
+
+        cred = Credential(cookies={"reddit_session": "test"}, username="spez")
+        delete_mock = MagicMock(return_value={})
+        with patch("rdt_cli.commands._common.get_credential", return_value=cred):
+            with patch("rdt_cli.client.RedditClient.validate_session", return_value={"authenticated": True}):
+                with patch("rdt_cli.client.RedditClient.delete_item", delete_mock):
+                    with patch("rdt_cli.commands.social.write_delay"):
+                        result = runner.invoke(cli, ["delete", "1abc123", "--yes"])
+                        assert result.exit_code == 0
+                        assert "Deleted" in result.output
+                        delete_mock.assert_called_once_with("t3_1abc123")
+
+    def test_delete_aborts_without_confirmation(self):
+        from unittest.mock import MagicMock
+
+        from rdt_cli.auth import Credential
+
+        cred = Credential(cookies={"reddit_session": "test"}, username="spez")
+        delete_mock = MagicMock(return_value={})
+        with patch("rdt_cli.commands._common.get_credential", return_value=cred):
+            with patch("rdt_cli.client.RedditClient.delete_item", delete_mock):
+                result = runner.invoke(cli, ["delete", "1abc123"], input="n\n")
+                assert result.exit_code == 0
+                delete_mock.assert_not_called()
 
 
 # ── Mocked subs-only feed ──────────────────────────────────────────

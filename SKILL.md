@@ -73,7 +73,7 @@ Payloads live under `.data`.
 - `--output file.json` → save structured output to file
 - Rich output → **stderr** (safe for pipes: `rdt search X --json | jq .data`)
 - Most read commands work without auth (public Reddit JSON API)
-- Write actions (upvote, save, subscribe, comment, post) require auth + built-in 1.5-4s delay
+- Write actions (upvote, save, subscribe, comment, delete, post) require auth + built-in 1.5-4s delay
 
 ## Command Reference
 
@@ -126,6 +126,7 @@ Payloads live under `.data`.
 | `rdt subscribe <sub>` | Subscribe | `rdt subscribe python` |
 | `rdt subscribe <sub> --undo` | Unsubscribe | `rdt subscribe python --undo` |
 | `rdt comment <id> <text>` | Post a comment | `rdt comment 3 "Great post!"` |
+| `rdt delete <id> -y` | Delete your own post/comment (irreversible; `-y` skips the prompt; use `t1_<id>` for comments) | `rdt delete 1abc123 -y` |
 
 ### Create posts (require auth)
 
@@ -259,7 +260,7 @@ Structured error codes returned in the `error.code` field (see [SCHEMA.md](./SCH
 ## Anti-Detection Notes for Agents
 
 - **Do NOT parallelize requests** — the built-in rate-limit delay is for account safety
-- **Write operation delay**: 1.5-4s random delay after each write (upvote/save/subscribe/comment)
+- **Write operation delay**: 1.5-4s random delay after each write (upvote/save/subscribe/comment/delete)
 - **Batch operations**: add delays between CLI calls when doing bulk work
 - **Chrome 133 fingerprint**: all requests use consistent browser identity
 - **Exponential backoff**: 429/5xx errors are auto-retried with backoff

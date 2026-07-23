@@ -7,7 +7,7 @@ Usage:
     rdt search <query> / export <query>
     rdt user <username> / user-posts <username> / user-comments <username>
     rdt saved / upvoted
-    rdt upvote / save / subscribe / comment
+    rdt upvote / save / subscribe / comment / delete
 """
 
 from __future__ import annotations
@@ -71,6 +71,7 @@ cli.add_command(social.upvote)
 cli.add_command(social.save)
 cli.add_command(social.subscribe)
 cli.add_command(social.comment)
+cli.add_command(social.delete)
 
 # ─── Create commands ────────────────────────────────────────────────
 
