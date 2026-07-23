@@ -32,7 +32,7 @@ class TestCliBasic:
         result = runner.invoke(cli, ["--help"])
         expected = [
             "login", "logout", "status",
-            "feed", "popular", "all", "sub", "sub-info", "user",
+            "feed", "popular", "all", "sub", "sub-info", "rules", "user",
             "user-posts", "user-comments", "saved", "upvoted", "open",
             "read", "show",
             "search", "export",
@@ -66,7 +66,7 @@ class TestCommandHelp:
         "cmd",
         [
             "login", "logout", "status",
-            "feed", "popular", "all", "sub", "sub-info", "user",
+            "feed", "popular", "all", "sub", "sub-info", "rules", "user",
             "user-posts", "user-comments", "saved", "upvoted", "open",
             "read", "show",
             "search", "export",
@@ -656,6 +656,35 @@ class TestMockedBrowse:
             with patch("rdt_cli.client.RedditClient.get_subreddit_about", return_value=mock_data):
                 result = runner.invoke(cli, ["sub-info", "python", "--json"])
                 assert result.exit_code == 0
+
+    def test_rules_mocked(self):
+        mock_data = {
+            "rules": [
+                {"kind": "all", "short_name": "Be nice", "description": "No harassment.", "priority": 0},
+                {"kind": "link", "short_name": "On topic", "description": "", "priority": 1},
+            ],
+            "site_rules": [],
+        }
+        with patch("rdt_cli.auth.get_credential", return_value=None):
+            with patch("rdt_cli.client.RedditClient.get_subreddit_rules", return_value=mock_data):
+                result = runner.invoke(cli, ["rules", "python", "--json"])
+                assert result.exit_code == 0
+                assert "Be nice" in result.output
+
+    def test_rules_rendered_mocked(self):
+        mock_data = {"rules": [{"kind": "comment", "short_name": "No spam", "description": "Don't spam."}]}
+        with patch("rdt_cli.auth.get_credential", return_value=None):
+            with patch("rdt_cli.client.RedditClient.get_subreddit_rules", return_value=mock_data):
+                result = runner.invoke(cli, ["rules", "python"], env={"OUTPUT": "rich"})
+                assert result.exit_code == 0
+                assert "No spam" in result.output
+
+    def test_rules_empty_mocked(self):
+        with patch("rdt_cli.auth.get_credential", return_value=None):
+            with patch("rdt_cli.client.RedditClient.get_subreddit_rules", return_value={"rules": []}):
+                result = runner.invoke(cli, ["rules", "python"], env={"OUTPUT": "rich"})
+                assert result.exit_code == 0
+                assert "no community rules" in result.output
 
     def test_user_mocked(self):
         mock_data = {"name": "testuser", "link_karma": 100, "comment_karma": 200}

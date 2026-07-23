@@ -33,6 +33,7 @@ from .constants import (
     SAVE_URL,
     SEARCH_URL,
     SUBREDDIT_ABOUT_URL,
+    SUBREDDIT_RULES_URL,
     SUBREDDIT_SEARCH_URL,
     SUBSCRIBE_URL,
     SUBSCRIPTIONS_URL,
@@ -210,6 +211,15 @@ class RedditClient:
         """Get subreddit info."""
         data = self._get(SUBREDDIT_ABOUT_URL.format(subreddit=subreddit), params={"raw_json": 1})
         return data.get("data", data)
+
+    def get_subreddit_rules(self, subreddit: str) -> dict:
+        """Get subreddit rules (``about/rules.json``).
+
+        Returns the raw response: ``rules`` (community rules, each with
+        ``short_name``, ``description``, ``kind``), plus Reddit-wide
+        ``site_rules``.
+        """
+        return self._get(SUBREDDIT_RULES_URL.format(subreddit=subreddit), params={"raw_json": 1})
 
     def get_link_flairs(self, subreddit: str) -> list[dict[str, Any]]:
         """List a subreddit's post flair templates (``link_flair_v2.json``).

@@ -87,6 +87,7 @@ Payloads live under `.data`.
 | `rdt all` | Browse /r/all | `rdt all -n 10 --compact --json` |
 | `rdt sub <name>` | Browse a subreddit | `rdt sub python -s top -t week` |
 | `rdt sub-info <name>` | View subreddit info | `rdt sub-info rust --json` |
+| `rdt rules <name>` | View subreddit rules | `rdt rules rust --json` |
 | `rdt user <name>` | View user profile | `rdt user spez --json` |
 | `rdt user-posts <name>` | View user's posts | `rdt user-posts spez -n 5 --json` |
 | `rdt user-comments <name>` | View user's comments | `rdt user-comments spez -n 5 --json` |

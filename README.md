@@ -81,6 +81,7 @@ rdt all                               # /r/all
 rdt sub python                        # Browse subreddit
 rdt sub programming -s top -t week    # Sort + time filter
 rdt sub-info python                   # Subreddit info (subscribers, etc.)
+rdt rules python                      # Subreddit rules
 rdt user spez                         # User profile
 rdt user-posts spez                   # User's submitted posts
 rdt user-comments spez                # User's comments
@@ -289,7 +290,7 @@ rdt_cli/
 └── commands/
     ├── _common.py        # Shared helpers (envelope, output routing, formatters)
     ├── auth.py           # login, logout, status, whoami
-    ├── browse.py         # feed, popular, all, sub, sub-info, user, user-posts, user-comments, saved, upvoted, open
+    ├── browse.py         # feed, popular, all, sub, sub-info, rules, user, user-posts, user-comments, saved, upvoted, open
     ├── post.py           # read, show
     ├── search.py         # search, export
     ├── social.py         # upvote, save, subscribe, comment
@@ -408,6 +409,7 @@ rdt all                               # /r/all
 rdt sub python                        # 浏览子版块
 rdt sub programming -s top -t week    # 排序 + 时间过滤
 rdt sub-info python                   # 子版块信息
+rdt rules python                      # 子版块规则
 rdt user spez                         # 用户资料
 rdt user-posts spez                   # 用户发帖
 rdt user-comments spez                # 用户评论

@@ -25,6 +25,7 @@ SUBREDDIT_NEW_URL = "/r/{subreddit}/new.json"
 SUBREDDIT_TOP_URL = "/r/{subreddit}/top.json"
 SUBREDDIT_RISING_URL = "/r/{subreddit}/rising.json"
 SUBREDDIT_ABOUT_URL = "/r/{subreddit}/about.json"
+SUBREDDIT_RULES_URL = "/r/{subreddit}/about/rules.json"
 
 # Post / comments
 POST_COMMENTS_URL = "/r/{subreddit}/comments/{post_id}.json"
